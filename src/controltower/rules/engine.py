@@ -35,19 +35,36 @@ def evaluate_rules(config: dict, sync_id: str) -> int:
     log.info("Rules evaluated. findings_created=%s", created)
     return created
 
-def _finding_exists(conn, project_gid: str, rule_id: str) -> bool:
-    r = conn.execute(text("""SELECT 1 FROM findings WHERE project_gid=:g AND rule_id=:r AND status='open' LIMIT 1"""),
-                     {"g": project_gid, "r": rule_id}).fetchone()
-    return r is not None
+def _get_open_finding(conn, project_gid: str, rule_id: str) -> dict | None:
+    r = conn.execute(text("""
+        SELECT id, severity, details
+        FROM findings
+        WHERE project_gid=:g AND rule_id=:r AND status='open'
+        LIMIT 1
+    """), {"g": project_gid, "r": rule_id}).mappings().first()
+    return r
 
-def _create_finding(conn, project_gid: str, rule_id: str, severity: str, details: dict) -> int:
-    if _finding_exists(conn, project_gid, rule_id):
-        return 0
-    conn.execute(text("""
-        INSERT INTO findings(project_gid, rule_id, severity, status, details)
-        VALUES(:g,:r,:s,'open',:d::jsonb)
-    """), {"g": project_gid, "r": rule_id, "s": severity, "d": json.dumps(details)})
-    return 1
+def _create_or_update_finding(conn, project_gid: str, rule_id: str, severity: str, details: dict) -> int:
+    existing = _get_open_finding(conn, project_gid, rule_id)
+    if not existing:
+        conn.execute(text("""
+            INSERT INTO findings(project_gid, rule_id, severity, status, details)
+            VALUES(:g,:r,:s,'open',:d::jsonb)
+        """), {"g": project_gid, "r": rule_id, "s": severity, "d": json.dumps(details)})
+        return 1
+
+    if existing["severity"] != severity:
+        new_details = dict(details)
+        new_details["prev_severity"] = existing["severity"]
+        new_details["slack_sent"] = False
+        conn.execute(text("""
+            UPDATE findings
+            SET severity=:s, details=:d::jsonb
+            WHERE id=:id
+        """), {"id": existing["id"], "s": severity, "d": json.dumps(new_details)})
+        return 1
+
+    return 0
 
 def _rule_no_status_update(conn, config: dict, p) -> int:
     rule = config["rules"]["no_status_update"]
@@ -59,7 +76,7 @@ def _rule_no_status_update(conn, config: dict, p) -> int:
     else:
         days = (_utcnow() - last).days
     if days > int(rule["days_threshold"]):
-        return _create_finding(conn, p["gid"], "no_status_update", rule["base_severity"], {
+        return _create_or_update_finding(conn, p["gid"], "no_status_update", rule["base_severity"], {
             "project_name": p["name"],
             "owner_name": p["owner_name"],
             "days_since_last_status_update": days,
@@ -74,7 +91,7 @@ def _rule_no_activity(conn, config: dict, p) -> int:
     created_7d = int(p["tasks_created_last_7d"] or 0)
     completed_7d = int(p["tasks_completed_last_7d"] or 0)
     if created_7d == 0 and completed_7d == 0:
-        return _create_finding(conn, p["gid"], "no_activity", rule["base_severity"], {
+        return _create_or_update_finding(conn, p["gid"], "no_activity", rule["base_severity"], {
             "project_name": p["name"],
             "owner_name": p["owner_name"],
             "tasks_created_last_7d": created_7d,
@@ -99,7 +116,7 @@ def _rule_schedule_risk(conn, config: dict, p) -> int:
     thresholds = sorted(rule["thresholds"], key=lambda x: x["days_remaining"])
     for t in thresholds:
         if days_remaining <= int(t["days_remaining"]) and progress < float(t["min_progress"]):
-            return _create_finding(conn, p["gid"], "schedule_risk", t["severity"], {
+            return _create_or_update_finding(conn, p["gid"], "schedule_risk", t["severity"], {
                 "project_name": p["name"],
                 "owner_name": p["owner_name"],
                 "days_remaining": days_remaining,
