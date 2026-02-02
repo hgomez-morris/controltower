@@ -1,0 +1,43 @@
+asana:
+  workspace_gid: ${ASANA_WORKSPACE_GID}
+  sync_interval_hours: 2
+
+slack:
+  webhook_url: ${SLACK_WEBHOOK_URL}
+  channel: ${SLACK_CHANNEL}
+
+database:
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  name: ${DB_NAME}
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+
+rules:
+  no_status_update:
+    enabled: true
+    days_threshold: 7
+    base_severity: medium
+
+  no_activity:
+    enabled: true
+    days_threshold: 7
+    base_severity: medium
+
+  schedule_risk:
+    enabled: true
+    thresholds:
+      - days_remaining: 7
+        min_progress: 80
+        severity: high
+      - days_remaining: 14
+        min_progress: 60
+        severity: medium
+      - days_remaining: 30
+        min_progress: 40
+        severity: low
+
+visibility:
+  # MVP: only JP and PMO
+  notify_jp: true
+  notify_pmo_channel: true

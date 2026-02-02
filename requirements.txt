@@ -1,0 +1,9 @@
+asana==5.0.12
+python-dotenv==1.0.1
+PyYAML==6.0.2
+SQLAlchemy==2.0.30
+psycopg2-binary==2.9.9
+pandas==2.2.2
+requests==2.32.3
+tenacity==8.5.0
+streamlit==1.37.1
