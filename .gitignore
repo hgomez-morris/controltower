@@ -3,6 +3,12 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
 .venv/
 .env
 *.log
@@ -16,3 +22,7 @@ Thumbs.db
 
 # Local DB
 data/
+
+# Temp / local artifacts
+temp/
+.tmp/
