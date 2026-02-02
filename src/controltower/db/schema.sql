@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS projects (
     last_activity_at TIMESTAMP,
     total_tasks INTEGER,
     completed_tasks INTEGER,
+    tasks_created_last_7d INTEGER,
+    tasks_completed_last_7d INTEGER,
     raw_data JSONB,
     synced_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()

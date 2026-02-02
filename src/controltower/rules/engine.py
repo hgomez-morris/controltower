@@ -20,7 +20,7 @@ def evaluate_rules(config: dict, sync_id: str) -> int:
     with engine.begin() as conn:
         projects = conn.execute(text("""
             SELECT gid, name, owner_name, due_date, calculated_progress, last_status_update_at,
-                   raw_data, last_activity_at
+                   raw_data, last_activity_at, tasks_created_last_7d, tasks_completed_last_7d
             FROM projects
         """)).mappings().all()
 
@@ -71,14 +71,14 @@ def _rule_no_activity(conn, config: dict, p) -> int:
     if not rule.get("enabled", True):
         return 0
 
-    # In MVP we approximate "activity" from last_activity_at timestamp stored during sync.
-    last_act = _parse_iso(p["last_activity_at"])
-    days = 999 if not last_act else (_utcnow() - last_act).days
-    if days > int(rule["days_threshold"]):
+    created_7d = int(p["tasks_created_last_7d"] or 0)
+    completed_7d = int(p["tasks_completed_last_7d"] or 0)
+    if created_7d == 0 and completed_7d == 0:
         return _create_finding(conn, p["gid"], "no_activity", rule["base_severity"], {
             "project_name": p["name"],
             "owner_name": p["owner_name"],
-            "days_since_last_activity": days,
+            "tasks_created_last_7d": created_7d,
+            "tasks_completed_last_7d": completed_7d,
         })
     return 0
 

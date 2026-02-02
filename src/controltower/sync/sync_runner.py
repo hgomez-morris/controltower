@@ -14,6 +14,8 @@ CRITICAL_FIELDS = [
     "last_status_update_by",
     "total_tasks",
     "completed_tasks",
+    "tasks_created_last_7d",
+    "tasks_completed_last_7d",
     "calculated_progress",
     "last_activity_at",
 ]
@@ -21,7 +23,7 @@ CRITICAL_FIELDS = [
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-def compute_task_metrics(tasks: list[dict], lookback_days: int = 7) -> dict:
+def compute_task_metrics(tasks: list[dict], lookback_days: int) -> dict:
     total = len(tasks)
     completed = sum(1 for t in tasks if t.get("completed") is True)
     progress = (completed / total * 100.0) if total > 0 else 0.0
@@ -66,11 +68,13 @@ def upsert_project(conn, project: dict) -> None:
     INSERT INTO projects (
         gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
         last_status_update_at, last_status_update_by, last_activity_at,
-        total_tasks, completed_tasks, raw_data, synced_at
+        total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d,
+        raw_data, synced_at
     ) VALUES (
         :gid, :name, :owner_gid, :owner_name, :due_date, :status, :calculated_progress,
         :last_status_update_at, :last_status_update_by, :last_activity_at,
-        :total_tasks, :completed_tasks, :raw_data::jsonb, :synced_at
+        :total_tasks, :completed_tasks, :tasks_created_last_7d, :tasks_completed_last_7d,
+        :raw_data::jsonb, :synced_at
     )
     ON CONFLICT (gid) DO UPDATE SET
         name = EXCLUDED.name,
@@ -84,6 +88,8 @@ def upsert_project(conn, project: dict) -> None:
         last_activity_at = EXCLUDED.last_activity_at,
         total_tasks = EXCLUDED.total_tasks,
         completed_tasks = EXCLUDED.completed_tasks,
+        tasks_created_last_7d = EXCLUDED.tasks_created_last_7d,
+        tasks_completed_last_7d = EXCLUDED.tasks_completed_last_7d,
         raw_data = EXCLUDED.raw_data,
         synced_at = EXCLUDED.synced_at
     """)
@@ -98,6 +104,7 @@ def main_sync(config: dict) -> str:
     token = os.getenv("ASANA_ACCESS_TOKEN","")
     workspace_gid = config["asana"]["workspace_gid"]
     client = AsanaReadOnlyClient(token)
+    lookback_days = int(config["rules"]["no_activity"].get("days_threshold", 7))
 
     with engine.begin() as conn:
         conn.execute(text("""INSERT INTO sync_log(sync_id, started_at, status) VALUES(:sync_id,:started,'running')"""),
@@ -110,7 +117,7 @@ def main_sync(config: dict) -> str:
             tasks = client.get_project_tasks(pgid)
             statuses = client.get_project_statuses(pgid)
 
-            metrics = compute_task_metrics(tasks)
+            metrics = compute_task_metrics(tasks, lookback_days=lookback_days)
             last_status = compute_last_status(statuses)
 
             owner = (pfull.get("owner") or {})
@@ -127,6 +134,8 @@ def main_sync(config: dict) -> str:
                 "last_activity_at": metrics["last_activity_at"],
                 "total_tasks": metrics["total_tasks"],
                 "completed_tasks": metrics["completed_tasks"],
+                "tasks_created_last_7d": metrics["tasks_created_last_7d"],
+                "tasks_completed_last_7d": metrics["tasks_completed_last_7d"],
                 "raw_data": json.dumps({"project": pfull, "tasks": tasks, "statuses": statuses}),
                 "synced_at": _utcnow().isoformat(),
             }
