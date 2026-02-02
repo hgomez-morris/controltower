@@ -1,6 +1,8 @@
 from __future__ import annotations
 import os, uuid, json, logging
 from datetime import datetime, timezone, timedelta
+from datetime import date as dt_date
+from decimal import Decimal
 from sqlalchemy import text
 from controltower.asana.client import AsanaReadOnlyClient
 from controltower.db.connection import get_engine
@@ -63,6 +65,26 @@ def compute_last_status(statuses: list[dict]) -> dict:
         "status": (s.get("color") or None),
     }
 
+def _norm_value(v) -> str | None:
+    if v is None:
+        return None
+    if isinstance(v, (datetime, dt_date)):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return str(v)
+    return str(v)
+
+def _detect_changes(existing: dict | None, new_row: dict) -> list[tuple[str, str | None, str | None]]:
+    if not existing:
+        return []
+    changes: list[tuple[str, str | None, str | None]] = []
+    for f in CRITICAL_FIELDS:
+        old_v = _norm_value(existing.get(f))
+        new_v = _norm_value(new_row.get(f))
+        if old_v != new_v:
+            changes.append((f, old_v, new_v))
+    return changes
+
 def upsert_project(conn, project: dict) -> None:
     q = text("""
     INSERT INTO projects (
@@ -111,6 +133,7 @@ def main_sync(config: dict) -> str:
                      {"sync_id": sync_id, "started": started.isoformat()})
 
         projects = client.list_projects(workspace_gid)
+        changes_detected = 0
         for p in projects:
             pgid = p["gid"]
             pfull = client.get_project(pgid)
@@ -139,10 +162,46 @@ def main_sync(config: dict) -> str:
                 "raw_data": json.dumps({"project": pfull, "tasks": tasks, "statuses": statuses}),
                 "synced_at": _utcnow().isoformat(),
             }
+            existing = conn.execute(text("""
+                SELECT gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
+                       last_status_update_at, last_status_update_by, last_activity_at,
+                       total_tasks, completed_tasks
+                FROM projects WHERE gid=:gid
+            """), {"gid": pgid}).mappings().first()
+
+            changes = _detect_changes(existing, row)
+            if changes:
+                detected_at = _utcnow().isoformat()
+                for field_name, old_v, new_v in changes:
+                    conn.execute(text("""
+                        INSERT INTO project_changelog(
+                            project_gid, field_name, old_value, new_value, changed_at, detected_at, sync_id
+                        ) VALUES (
+                            :gid, :field, :old, :new, :changed_at, :detected_at, :sync_id
+                        )
+                    """), {
+                        "gid": pgid,
+                        "field": field_name,
+                        "old": old_v,
+                        "new": new_v,
+                        "changed_at": row["synced_at"],
+                        "detected_at": detected_at,
+                        "sync_id": sync_id,
+                    })
+                changes_detected += len(changes)
+
             upsert_project(conn, row)
 
-        conn.execute(text("""UPDATE sync_log SET completed_at=:completed, status='completed', projects_synced=:n WHERE sync_id=:sync_id"""),
-                     {"completed": _utcnow().isoformat(), "n": len(projects), "sync_id": sync_id})
+        conn.execute(text("""
+            UPDATE sync_log
+            SET completed_at=:completed, status='completed', projects_synced=:n, changes_detected=:c
+            WHERE sync_id=:sync_id
+        """), {
+            "completed": _utcnow().isoformat(),
+            "n": len(projects),
+            "c": changes_detected,
+            "sync_id": sync_id
+        })
 
     log.info("Sync completed. sync_id=%s projects=%s", sync_id, len(projects))
     return sync_id
