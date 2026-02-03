@@ -7,10 +7,12 @@ from controltower.db.connection import get_engine
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-def _parse_iso(ts: str | None) -> datetime | None:
+def _parse_iso(ts: str | datetime | None) -> datetime | None:
     if not ts:
         return None
-    return datetime.fromisoformat(ts.replace("Z","+00:00")).astimezone(timezone.utc)
+    if isinstance(ts, datetime):
+        return ts.astimezone(timezone.utc)
+    return datetime.fromisoformat(str(ts).replace("Z","+00:00")).astimezone(timezone.utc)
 
 def evaluate_rules(config: dict, sync_id: str) -> int:
     log = logging.getLogger("rules")
