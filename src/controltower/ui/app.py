@@ -100,9 +100,19 @@ if page == "Dashboard":
               SUM(CASE WHEN severity='high' AND status='open' THEN 1 ELSE 0 END) AS high_open
             FROM findings
         """)).mappings().one()
+        by_rule = conn.execute(text("""
+            SELECT rule_id, COUNT(*) AS n
+            FROM findings
+            WHERE status='open'
+            GROUP BY rule_id
+            ORDER BY n DESC
+        """)).mappings().all()
     c1, c2 = st.columns(2)
     c1.metric("Hallazgos abiertos", counts["open_findings"] or 0)
     c2.metric("Hallazgos alta severidad", counts["high_open"] or 0)
+    st.markdown("**Desglose por regla (open)**")
+    if by_rule:
+        st.dataframe(pd.DataFrame(by_rule), use_container_width=True, height=200)
 
 elif page == "Proyectos":
     st.subheader("Proyectos")
@@ -271,7 +281,7 @@ elif page == "Findings":
         where.append("severity = :severity")
         params["severity"] = severity_filter
     if status_filter != "(todas)":
-        where.append("status = :status")
+        where.append("f.status = :status")
         params["status"] = status_filter
     if project_query.strip():
         where.append("(details->>'project_name') ILIKE :pname")
