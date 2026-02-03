@@ -121,7 +121,7 @@ elif page == "Proyectos":
     pmo_id_query = fcols[1].text_input("PMO-ID contiene")
     resp_query = fcols[2].text_input("Responsable contiene")
     client_query = fcols[3].text_input("Cliente contiene")
-    sponsor_query = fcols[4].text_input("Sponsor contiene")
+    sponsor_query = fcols[4].text_input("Sponsor contiene", value="Abrigo")
     status_filter = fcols[5].selectbox("Estado", ["(todos)", "on_track", "at_risk", "off_track", "on_hold", "none"])
 
     fcols2 = st.columns(3)
@@ -265,7 +265,7 @@ elif page == "Findings":
     rule_filter = fcols[0].selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
     severity_filter = fcols[1].selectbox("Severidad", ["(todas)", "low", "medium", "high"])
     status_filter = fcols[2].selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
-    sponsor_query = fcols[3].text_input("Sponsor contiene")
+    sponsor_query = fcols[3].text_input("Sponsor contiene", value="Abrigo")
 
     fcols2 = st.columns(3)
     project_query = fcols2[0].text_input("Proyecto contiene")
