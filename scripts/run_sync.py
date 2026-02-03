@@ -10,7 +10,8 @@ def main():
     cfg = load_config(os.path.join("config","config.example.yaml"))
     sync_id = main_sync(cfg)
     evaluate_rules(cfg, sync_id)
-    post_new_findings_to_slack(cfg)
+    if (cfg.get("slack", {}) or {}).get("enabled", False):
+        post_new_findings_to_slack(cfg)
 
 if __name__ == "__main__":
     main()

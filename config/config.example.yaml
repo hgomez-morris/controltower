@@ -5,6 +5,7 @@ asana:
 slack:
   webhook_url: ${SLACK_WEBHOOK_URL}
   channel: ${SLACK_CHANNEL}
+  enabled: false
 
 database:
   host: ${DB_HOST}

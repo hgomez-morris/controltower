@@ -1,12 +1,16 @@
 import streamlit as st
 import json
+import os
 import pandas as pd
 from datetime import datetime, timezone
 from sqlalchemy import text
 from controltower.db.connection import get_engine
+from controltower.config import load_config
+from controltower.actions.slack import post_new_findings_to_slack
 
 st.set_page_config(page_title="PMO Control Tower (MVP)", layout="wide")
 engine = get_engine()
+cfg = load_config("config/config.yaml") if os.path.exists("config/config.yaml") else load_config("config/config.example.yaml")
 
 st.title("PMO Control Tower - MVP")
 
@@ -234,6 +238,12 @@ elif page == "Proyectos":
 
 elif page == "Findings":
     st.subheader("Findings")
+    if st.button("Enviar findings a Slack"):
+        try:
+            sent = post_new_findings_to_slack(cfg)
+            st.success(f"Mensajes enviados: {sent}")
+        except Exception as e:
+            st.error(f"Error enviando a Slack: {e}")
     fcols = st.columns(4)
     rule_filter = fcols[0].selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
     severity_filter = fcols[1].selectbox("Severidad", ["(todas)", "low", "medium", "high"])
