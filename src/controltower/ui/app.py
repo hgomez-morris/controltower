@@ -34,6 +34,28 @@ def _extract_custom_fields(project_raw):
         out.append({"name": name, "value": val})
     return out
 
+def _custom_field_map(project_raw):
+    fields = _extract_custom_fields(project_raw)
+    return {f["name"]: f["value"] for f in fields}
+
+def _build_custom_fields_dictionary(rows):
+    d = {}
+    for p in rows:
+        project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
+        if not project_raw:
+            continue
+        for f in project_raw.get("custom_fields") or []:
+            gid = f.get("gid")
+            if not gid:
+                continue
+            d.setdefault(gid, {
+                "gid": gid,
+                "name": f.get("name"),
+                "type": f.get("type"),
+                "enum_options": f.get("enum_options"),
+            })
+    return d
+
 # Sidebar filters
 with st.sidebar:
     st.header("Filtros")
@@ -75,20 +97,24 @@ with tab2:
             LIMIT :limit OFFSET :offset
         """), {"limit": int(limit), "offset": int(offset)}).mappings().all()
 
-    nav_cols = st.columns([1, 1, 2])
+    nav_cols = st.columns([1, 1, 2, 2])
     if nav_cols[0].button("Pagina anterior") and page > 1:
         st.session_state["page_projects"] = page - 1
         st.rerun()
     nav_cols[1].button("Pagina siguiente", on_click=lambda: st.session_state.__setitem__("page_projects", page + 1))
-    nav_cols[2].markdown(f"**Pagina:** {page}  |  **Pagina size:** {int(limit)}")
+    nav_cols[2].markdown(f"**Pagina:** {page}")
+    nav_cols[3].markdown(f"**Pagina size:** {int(limit)}")
 
-    header_cols = st.columns([4, 2, 2, 2, 2, 1])
+    header_cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 1])
     header_cols[0].markdown("**Proyecto**")
-    header_cols[1].markdown("**Owner**")
-    header_cols[2].markdown("**Status**")
-    header_cols[3].markdown("**Due date**")
-    header_cols[4].markdown("**Ult. actividad**")
-    header_cols[5].markdown("**Ver**")
+    header_cols[1].markdown("**PMO-ID**")
+    header_cols[2].markdown("**Responsable**")
+    header_cols[3].markdown("**Sponsor**")
+    header_cols[4].markdown("**Prioridad**")
+    header_cols[5].markdown("**Cliente**")
+    header_cols[6].markdown("**Inicio**")
+    header_cols[7].markdown("**Termino Plan**")
+    header_cols[8].markdown("**Ver**")
 
     if "show_project_gid" not in st.session_state:
         st.session_state["show_project_gid"] = None
@@ -111,19 +137,33 @@ with tab2:
             st.rerun()
 
     for p in projects:
-        cols = st.columns([4, 2, 2, 2, 2, 1])
+        project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
+        cf = _custom_field_map(project_raw) if project_raw else {}
+        cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 1])
         cols[0].write(p.get("name") or "(sin nombre)")
-        cols[1].write(p.get("owner_name") or "")
-        cols[2].write(p.get("status") or "")
-        cols[3].write(p.get("due_date") or "")
-        cols[4].write(p.get("last_activity_at") or "")
-        if cols[5].button("Ver", key=f"view_{p.get('gid')}"):
+        cols[1].write(cf.get("PMO ID") or "")
+        cols[2].write(cf.get("Responsable de proyecto") or p.get("owner_name") or "")
+        cols[3].write(cf.get("Sponsor") or "")
+        cols[4].write(cf.get("Priority") or cf.get("Prioridad") or "")
+        cols[5].write(cf.get("Cliente") or "")
+        cols[6].write(cf.get("Fecha Inicio del proyecto") or cf.get("Fecha Inicio") or "")
+        cols[7].write(cf.get("Fecha Planificada Termino del proyecto") or cf.get("Fecha Planificada T?rmino del proyecto") or "")
+        if cols[8].button("Ver", key=f"view_{p.get('gid')}"):
             st.session_state["show_project_gid"] = p.get("gid")
             st.session_state["show_project_row"] = p
             _show_project_dialog(p)
 
     if st.session_state.get("show_project_gid") and st.session_state.get("show_project_row"):
         _show_project_dialog(st.session_state["show_project_row"])
+
+    if st.button("Generar diccionario de campos (custom fields)"):
+        d = _build_custom_fields_dictionary(projects)
+        st.download_button(
+            "Descargar diccionario",
+            data=json.dumps(d, ensure_ascii=False, indent=2),
+            file_name="asana_custom_fields.json",
+            mime="application/json",
+        )
 
 with tab3:
     st.subheader("Hallazgos")
