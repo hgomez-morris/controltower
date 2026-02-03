@@ -138,7 +138,10 @@ def main_sync(config: dict) -> str:
 
         projects = client.list_projects(workspace_gid)
         changes_detected = 0
-        for p in projects:
+        total = len(projects)
+        for i, p in enumerate(projects, start=1):
+            if i == 1 or i % 25 == 0 or i == total:
+                log.info("Sync progress: %s/%s projects", i, total)
             pgid = p["gid"]
             pfull = client.get_project(pgid)
             if pfull.get("completed") is True:
