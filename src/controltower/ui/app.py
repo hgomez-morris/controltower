@@ -281,7 +281,7 @@ elif page == "Proyectos":
         "cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
         "inicio": _fmt_date(_cf_value_from_project_row(p, "Fecha Inicio del proyecto") or _cf_value_from_project_row(p, "Fecha Inicio")),
         "termino_plan": _fmt_date(_cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto") or _cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto")),
-        "status_ultimo": f\"{p.get('status') or ''} {_humanize_last_update(p.get('last_status_update_at'))}\".strip(),
+        "status_ultimo": f"{p.get('status') or ''} {_humanize_last_update(p.get('last_status_update_at'))}".strip(),
         "gid": p.get("gid"),
     } for p in projects])
 
