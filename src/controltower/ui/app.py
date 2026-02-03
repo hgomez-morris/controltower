@@ -557,16 +557,15 @@ elif page == "Findings":
         df_export.to_excel(writer, index=False, sheet_name="findings")
         ws = writer.sheets["findings"]
         widths = {
-            "PMO-ID": 70,
-            "Nombre de proyecto": 400,
-            "Cliente": 160,
-            "Responsable del proyecto": 160,
-            "Sponsor": 160,
+            "PMO-ID": 30,
+            "Nombre de proyecto": 100,
+            "Cliente": 70,
+            "Responsable del proyecto": 70,
+            "Sponsor": 70,
         }
         for idx, col in enumerate(df_export.columns, start=1):
             col_name = str(col)
-            if col_name in widths:
-                ws.column_dimensions[get_column_letter(idx)].width = widths[col_name]
+            ws.column_dimensions[get_column_letter(idx)].width = widths.get(col_name, 50)
     st.download_button(
         "Exportar a Excel",
         data=buf.getvalue(),
