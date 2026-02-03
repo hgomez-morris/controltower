@@ -48,8 +48,8 @@ def _create_or_update_finding(conn, project_gid: str, rule_id: str, severity: st
     existing = _get_open_finding(conn, project_gid, rule_id)
     if not existing:
         conn.execute(text("""
-            INSERT INTO findings(project_gid, rule_id, severity, status, details)
-            VALUES(:g,:r,:s,'open',:d::jsonb)
+        INSERT INTO findings(project_gid, rule_id, severity, status, details)
+        VALUES(:g,:r,:s,'open',CAST(:d AS jsonb))
         """), {"g": project_gid, "r": rule_id, "s": severity, "d": json.dumps(details)})
         return 1
 
