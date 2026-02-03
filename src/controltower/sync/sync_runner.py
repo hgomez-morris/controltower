@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, uuid, json, logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from datetime import date as dt_date
 from decimal import Decimal
 from sqlalchemy import text
@@ -24,6 +24,42 @@ CRITICAL_FIELDS = [
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+def compute_task_metrics(tasks: list[dict], lookback_days: int) -> dict:
+    total = len(tasks)
+    completed = sum(1 for t in tasks if t.get("completed") is True)
+    progress = (completed / total * 100.0) if total > 0 else 0.0
+    lookback = _utcnow() - timedelta(days=lookback_days)
+
+    created_last = sum(
+        1
+        for t in tasks
+        if t.get("created_at")
+        and datetime.fromisoformat(t["created_at"].replace("Z", "+00:00")) >= lookback
+    )
+    completed_last = sum(
+        1
+        for t in tasks
+        if t.get("completed_at")
+        and datetime.fromisoformat(t["completed_at"].replace("Z", "+00:00")) >= lookback
+    )
+
+    times = []
+    for t in tasks:
+        for k in ("modified_at", "completed_at", "created_at"):
+            v = t.get(k)
+            if v:
+                times.append(datetime.fromisoformat(v.replace("Z", "+00:00")))
+    last_activity_at = max(times).astimezone(timezone.utc) if times else None
+
+    return {
+        "total_tasks": total,
+        "completed_tasks": completed,
+        "calculated_progress": round(progress, 2),
+        "tasks_created_last_7d": created_last,
+        "tasks_completed_last_7d": completed_last,
+        "last_activity_at": last_activity_at.isoformat() if last_activity_at else None,
+    }
 
 def compute_last_status_from_project(project: dict) -> dict:
     status = project.get("current_status") or {}
@@ -94,6 +130,7 @@ def main_sync(config: dict) -> str:
     token = os.getenv("ASANA_ACCESS_TOKEN","")
     workspace_gid = config["asana"]["workspace_gid"]
     client = AsanaReadOnlyClient(token)
+    lookback_days = int(config["rules"]["no_activity"].get("days_threshold", 7))
 
     with engine.begin() as conn:
         conn.execute(text("""INSERT INTO sync_log(sync_id, started_at, status) VALUES(:sync_id,:started,'running')"""),
@@ -107,6 +144,8 @@ def main_sync(config: dict) -> str:
             if pfull.get("completed") is True:
                 continue
 
+            tasks = client.get_project_tasks(pgid)
+            metrics = compute_task_metrics(tasks, lookback_days=lookback_days)
             last_status = compute_last_status_from_project(pfull)
 
             owner = (pfull.get("owner") or {})
@@ -117,14 +156,14 @@ def main_sync(config: dict) -> str:
                 "owner_name": owner.get("name"),
                 "due_date": pfull.get("due_date") or pfull.get("due_on"),
                 "status": last_status.get("status"),
-                "calculated_progress": None,
+                "calculated_progress": metrics["calculated_progress"],
                 "last_status_update_at": last_status.get("last_status_update_at"),
                 "last_status_update_by": last_status.get("last_status_update_by"),
-                "last_activity_at": pfull.get("modified_at") or pfull.get("created_at"),
-                "total_tasks": None,
-                "completed_tasks": None,
-                "tasks_created_last_7d": None,
-                "tasks_completed_last_7d": None,
+                "last_activity_at": metrics["last_activity_at"] or pfull.get("modified_at") or pfull.get("created_at"),
+                "total_tasks": metrics["total_tasks"],
+                "completed_tasks": metrics["completed_tasks"],
+                "tasks_created_last_7d": metrics["tasks_created_last_7d"],
+                "tasks_completed_last_7d": metrics["tasks_completed_last_7d"],
                 "raw_data": json.dumps({"project": pfull}),
                 "synced_at": _utcnow().isoformat(),
             }
