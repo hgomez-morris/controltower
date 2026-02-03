@@ -291,14 +291,40 @@ elif page == "Findings":
     with engine.begin() as conn:
         rows = conn.execute(text(q), params).mappings().all()
 
+    # Build project lookup for richer grid fields
+    project_gids = list({r.get("project_gid") for r in rows if r.get("project_gid")})
+    projects_map = {}
+    if project_gids:
+        with engine.begin() as conn:
+            proj_rows = conn.execute(text("""
+                SELECT gid, name, status, last_status_update_at, raw_data
+                FROM projects
+                WHERE gid = ANY(:gids)
+            """), {"gids": project_gids}).mappings().all()
+        projects_map = {p["gid"]: p for p in proj_rows}
+
+    def _rule_message(r, p):
+        rule = r.get("rule_id")
+        details = r.get("details") or {}
+        if rule == "no_status_update":
+            days = details.get("days_since_last_status_update", "N/A")
+            return f"Actualización de estado con más de {days} días. El JP debe publicar un status update (cada 7 días)."
+        if rule == "no_activity":
+            return "Sin actividad reciente. El JP debe crear o completar tareas esta semana."
+        if rule == "schedule_risk":
+            return "Riesgo de calendario. El JP debe ajustar plan o acelerar ejecución para cumplir el progreso esperado."
+        return "Revisar el hallazgo y tomar acción correctiva."
+
     fdf = pd.DataFrame([{
         "select": False,
         "id": r.get("id"),
-        "project_gid": r.get("project_gid"),
-        "rule_id": r.get("rule_id"),
-        "severity": r.get("severity"),
-        "status": r.get("status"),
-        "created_at": r.get("created_at"),
+        "pmo_id": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "PMO ID"),
+        "proyecto": (projects_map.get(r.get("project_gid")) or {}).get("name") or "",
+        "cliente": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Cliente"),
+        "responsable": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Responsable Proyecto"),
+        "regla": r.get("rule_id"),
+        "severidad": r.get("severity"),
+        "motivo": _rule_message(r, projects_map.get(r.get("project_gid")) or {}),
     } for r in rows])
 
     edited = st.data_editor(
@@ -306,7 +332,7 @@ elif page == "Findings":
         use_container_width=True,
         height=400,
         column_config={"select": st.column_config.CheckboxColumn("Seleccionar")},
-        disabled=["id", "project_gid", "rule_id", "severity", "status", "created_at"],
+        disabled=["id", "pmo_id", "proyecto", "cliente", "responsable", "regla", "severidad", "motivo"],
     )
 
     selected_ids = edited[edited["select"] == True]["id"].tolist() if not edited.empty else []
@@ -335,17 +361,6 @@ elif page == "Findings":
         if not selected_ids:
             st.warning("Selecciona al menos un finding.")
         else:
-            project_gids = list({r.get("project_gid") for r in rows if r.get("id") in selected_ids})
-            projects_map = {}
-            if project_gids:
-                with engine.begin() as conn:
-                    proj_rows = conn.execute(text("""
-                        SELECT gid, name, status, last_status_update_at, raw_data
-                        FROM projects
-                        WHERE gid = ANY(:gids)
-                    """), {"gids": project_gids}).mappings().all()
-                projects_map = {p["gid"]: p for p in proj_rows}
-
             export_rows = []
             for r in rows:
                 if r.get("id") not in selected_ids:
@@ -354,12 +369,11 @@ elif page == "Findings":
                 export_rows.append({
                     "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
                     "Proyecto": p.get("name") or "",
-                    "Fecha inicio": _fmt_date(_cf_value_from_project_row(p, "Fecha Inicio del proyecto") or _cf_value_from_project_row(p, "Fecha Inicio")),
-                    "Fecha termino": _fmt_date(_cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto") or _cf_value_from_project_row(p, "Fecha Planificada Término del proyecto")),
-                    "Status": p.get("status") or "",
-                    "Ultima actualizacion": _humanize_last_update(p.get("last_status_update_at")),
+                    "Cliente": _cf_value_from_project_row(p, "Cliente") or "",
                     "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or "",
-                    "Sponsor": _cf_value_from_project_row(p, "Sponsor") or "",
+                    "Regla": r.get("rule_id"),
+                    "Severidad": r.get("severity"),
+                    "Motivo": _rule_message(r, p),
                 })
 
             csv = pd.DataFrame(export_rows).to_csv(index=False)
