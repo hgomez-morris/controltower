@@ -2,6 +2,7 @@
 import json
 import os
 import pandas as pd
+import plotly.express as px
 from datetime import datetime, timezone
 from sqlalchemy import text
 from controltower.db.connection import get_engine
@@ -107,12 +108,45 @@ if page == "Dashboard":
             GROUP BY rule_id
             ORDER BY n DESC
         """)).mappings().all()
+
+        by_sponsor = conn.execute(text("""
+            SELECT COALESCE(cf->>'display_value','(sin sponsor)') AS sponsor, COUNT(*) AS n
+            FROM findings f
+            JOIN projects p ON p.gid = f.project_gid
+            LEFT JOIN LATERAL jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+              ON cf->>'name' = 'Sponsor'
+            WHERE f.status='open'
+            GROUP BY sponsor
+            ORDER BY n DESC
+        """)).mappings().all()
+
+        by_project_status = conn.execute(text("""
+            SELECT COALESCE(p.status,'(sin status)') AS status, COUNT(*) AS n
+            FROM findings f
+            JOIN projects p ON p.gid = f.project_gid
+            WHERE f.status='open'
+            GROUP BY status
+            ORDER BY n DESC
+        """)).mappings().all()
     c1, c2 = st.columns(2)
     c1.metric("Hallazgos abiertos", counts["open_findings"] or 0)
     c2.metric("Hallazgos alta severidad", counts["high_open"] or 0)
     st.markdown("**Desglose por regla (open)**")
     if by_rule:
-        st.dataframe(pd.DataFrame(by_rule), use_container_width=True, height=200)
+        df_rules = pd.DataFrame(by_rule).rename(columns={"rule_id": "Regla", "n": "Cantidad de problemas"})
+        st.dataframe(df_rules, use_container_width=True, height=200, hide_index=True)
+
+    st.markdown("**Distribución por sponsor (open)**")
+    if by_sponsor:
+        df_sponsor = pd.DataFrame(by_sponsor).rename(columns={"n": "Cantidad"})
+        fig_sponsor = px.pie(df_sponsor, values="Cantidad", names="sponsor")
+        st.plotly_chart(fig_sponsor, use_container_width=True)
+
+    st.markdown("**Distribución por estado del proyecto (open)**")
+    if by_project_status:
+        df_status = pd.DataFrame(by_project_status).rename(columns={"n": "Cantidad"})
+        fig_status = px.pie(df_status, values="Cantidad", names="status")
+        st.plotly_chart(fig_status, use_container_width=True)
 
 elif page == "Proyectos":
     st.subheader("Proyectos")
