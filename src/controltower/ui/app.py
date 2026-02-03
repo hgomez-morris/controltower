@@ -488,81 +488,80 @@ elif page == "Findings":
             )
 
     # Exportar a Excel (por proyecto, marcando reglas)
-    if st.button("Exportar a Excel"):
-        project_gids = list({r.get("project_gid") for r in rows if r.get("project_gid")})
-        projects_map = {}
-        if project_gids:
-            with engine.begin() as conn:
-                proj_rows = conn.execute(text("""
-                    SELECT gid, name, raw_data, last_status_update_at, total_tasks, status
-                    FROM projects
-                    WHERE gid = ANY(:gids)
-                """), {"gids": project_gids}).mappings().all()
-            projects_map = {p["gid"]: p for p in proj_rows}
+    project_gids = list({r.get("project_gid") for r in rows if r.get("project_gid")})
+    projects_map = {}
+    if project_gids:
+        with engine.begin() as conn:
+            proj_rows = conn.execute(text("""
+                SELECT gid, name, raw_data, last_status_update_at, total_tasks, status
+                FROM projects
+                WHERE gid = ANY(:gids)
+            """), {"gids": project_gids}).mappings().all()
+        projects_map = {p["gid"]: p for p in proj_rows}
 
-        # Build rule columns from config
-        rule_cols = [r for r in (cfg.get("rules") or {}).keys() if r != "schedule_risk"]
-        if not rule_cols:
-            rule_cols = ["no_status_update", "no_activity", "amount_of_tasks"]
+    # Build rule columns from config
+    rule_cols = [r for r in (cfg.get("rules") or {}).keys() if r != "schedule_risk"]
+    if not rule_cols:
+        rule_cols = ["no_status_update", "no_activity", "amount_of_tasks"]
 
-        # Aggregate per project
-        by_project = {}
-        for r in rows:
-            gid = r.get("project_gid")
-            if not gid:
-                continue
-            p = projects_map.get(gid) or {}
-            if gid not in by_project:
-                last_update = p.get("last_status_update_at")
-                days_since = ""
-                if last_update:
-                    if isinstance(last_update, str):
-                        try:
-                            last_update = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
-                        except Exception:
-                            last_update = None
-                    if isinstance(last_update, datetime):
-                        days_since = (datetime.now(timezone.utc) - last_update.astimezone(timezone.utc)).days
-                total_tasks = p.get("total_tasks")
-                by_project[gid] = {
-                    "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
-                    "Nombre de proyecto": p.get("name") or "",
-                    "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
-                    "Responsable del proyecto": _cf_value_from_project_row(p, "Responsable Proyecto"),
-                    "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
-                    "Estado del proyecto": p.get("status") or "",
-                    "Dias desde ultimo update": days_since,
-                    "Cantidad de tareas": total_tasks if total_tasks is not None else "",
-                }
-                for rc in rule_cols:
-                    by_project[gid][rc] = ""
-            rule_id = r.get("rule_id")
-            if rule_id in by_project[gid]:
-                by_project[gid][rule_id] = "X"
-
-        export_rows = list(by_project.values())
-        df_export = pd.DataFrame(export_rows)
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            df_export.to_excel(writer, index=False, sheet_name="findings")
-            ws = writer.sheets["findings"]
-            widths = {
-                "PMO-ID": 70,
-                "Nombre de proyecto": 400,
-                "Cliente": 160,
-                "Responsable del proyecto": 160,
-                "Sponsor": 160,
+    # Aggregate per project
+    by_project = {}
+    for r in rows:
+        gid = r.get("project_gid")
+        if not gid:
+            continue
+        p = projects_map.get(gid) or {}
+        if gid not in by_project:
+            last_update = p.get("last_status_update_at")
+            days_since = ""
+            if last_update:
+                if isinstance(last_update, str):
+                    try:
+                        last_update = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
+                    except Exception:
+                        last_update = None
+                if isinstance(last_update, datetime):
+                    days_since = (datetime.now(timezone.utc) - last_update.astimezone(timezone.utc)).days
+            total_tasks = p.get("total_tasks")
+            by_project[gid] = {
+                "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+                "Nombre de proyecto": p.get("name") or "",
+                "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
+                "Responsable del proyecto": _cf_value_from_project_row(p, "Responsable Proyecto"),
+                "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+                "Estado del proyecto": p.get("status") or "",
+                "Dias desde ultimo update": days_since,
+                "Cantidad de tareas": total_tasks if total_tasks is not None else "",
             }
-            for idx, col in enumerate(df_export.columns, start=1):
-                col_name = str(col)
-                if col_name in widths:
-                    ws.column_dimensions[get_column_letter(idx)].width = widths[col_name]
-        st.download_button(
-            "Descargar Excel",
-            data=buf.getvalue(),
-            file_name="findings.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+            for rc in rule_cols:
+                by_project[gid][rc] = ""
+        rule_id = r.get("rule_id")
+        if rule_id in by_project[gid]:
+            by_project[gid][rule_id] = "X"
+
+    export_rows = list(by_project.values())
+    df_export = pd.DataFrame(export_rows)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df_export.to_excel(writer, index=False, sheet_name="findings")
+        ws = writer.sheets["findings"]
+        widths = {
+            "PMO-ID": 70,
+            "Nombre de proyecto": 400,
+            "Cliente": 160,
+            "Responsable del proyecto": 160,
+            "Sponsor": 160,
+        }
+        for idx, col in enumerate(df_export.columns, start=1):
+            col_name = str(col)
+            if col_name in widths:
+                ws.column_dimensions[get_column_letter(idx)].width = widths[col_name]
+    st.download_button(
+        "Exportar a Excel",
+        data=buf.getvalue(),
+        file_name="findings.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
     ack_cols = st.columns(3)
     ack_ids = ack_cols[0].text_input("IDs para Acknowledge (coma)")
