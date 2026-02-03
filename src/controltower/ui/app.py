@@ -1,5 +1,6 @@
 import streamlit as st
 import json
+import pandas as pd
 from sqlalchemy import text
 from controltower.db.connection import get_engine
 
@@ -70,19 +71,33 @@ with tab2:
             LIMIT :limit
         """), {"limit": int(limit)}).mappings().all()
 
-    for p in projects:
-        title = f"{p['name']}" if p["name"] else "(sin nombre)"
-        with st.expander(title):
-            project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
-            st.json(_jsonable(p))
-            if project_raw:
-                custom_fields = _extract_custom_fields(project_raw)
-                if custom_fields:
-                    st.markdown("**Campos personalizados**")
-                    st.json(_jsonable(custom_fields))
-                if show_raw:
-                    st.markdown("**Proyecto (raw)**")
-                    st.json(_jsonable(project_raw))
+    df = pd.DataFrame([{
+        "gid": p.get("gid"),
+        "name": p.get("name"),
+        "owner_name": p.get("owner_name"),
+        "status": p.get("status"),
+        "due_date": p.get("due_date"),
+        "last_status_update_at": p.get("last_status_update_at"),
+        "last_activity_at": p.get("last_activity_at"),
+    } for p in projects])
+
+    st.dataframe(df, use_container_width=True, height=400)
+
+    if projects:
+        options = {f"{p.get('name','(sin nombre)')} | {p.get('gid')}": p for p in projects}
+        selected = st.selectbox("Ver detalle de proyecto", list(options.keys()))
+        p = options[selected]
+        project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
+        st.markdown("**Detalle**")
+        st.json(_jsonable(p))
+        if project_raw:
+            custom_fields = _extract_custom_fields(project_raw)
+            if custom_fields:
+                st.markdown("**Campos personalizados**")
+                st.json(_jsonable(custom_fields))
+            if show_raw:
+                st.markdown("**Proyecto (raw)**")
+                st.json(_jsonable(project_raw))
 
 with tab3:
     st.subheader("Hallazgos")
@@ -115,6 +130,16 @@ with tab3:
 
     with engine.begin() as conn:
         rows = conn.execute(text(q), params).mappings().all()
+
+    fdf = pd.DataFrame([{
+        "id": r.get("id"),
+        "project_gid": r.get("project_gid"),
+        "rule_id": r.get("rule_id"),
+        "severity": r.get("severity"),
+        "status": r.get("status"),
+        "created_at": r.get("created_at"),
+    } for r in rows])
+    st.dataframe(fdf, use_container_width=True, height=400)
 
     for r in rows:
         details = r["details"] or {}
