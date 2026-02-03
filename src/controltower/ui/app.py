@@ -41,7 +41,8 @@ with st.sidebar:
     status_filter = st.selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
     project_query = st.text_input("Proyecto contiene")
     owner_query = st.text_input("JP / Owner contiene")
-    limit = st.number_input("Limite", min_value=50, max_value=2000, value=500, step=50)
+    limit = st.number_input("Limite", min_value=25, max_value=500, value=100, step=25)
+    show_raw = st.checkbox("Mostrar raw del proyecto", value=False)
 
 
 tab1, tab2, tab3 = st.tabs(["Dashboard", "Projects", "Findings"])
@@ -75,12 +76,13 @@ with tab2:
             project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
             st.json(_jsonable(p))
             if project_raw:
-                st.markdown("**Proyecto (raw)**")
-                st.json(_jsonable(project_raw))
                 custom_fields = _extract_custom_fields(project_raw)
                 if custom_fields:
                     st.markdown("**Campos personalizados**")
                     st.json(_jsonable(custom_fields))
+                if show_raw:
+                    st.markdown("**Proyecto (raw)**")
+                    st.json(_jsonable(project_raw))
 
 with tab3:
     st.subheader("Hallazgos")
