@@ -97,15 +97,24 @@ if page == "Dashboard":
     with engine.begin() as conn:
         counts = conn.execute(text("""
             SELECT
-              SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS open_findings,
-              SUM(CASE WHEN severity='high' AND status='open' THEN 1 ELSE 0 END) AS high_open
-            FROM findings
+              SUM(CASE WHEN f.status='open' THEN 1 ELSE 0 END) AS open_findings,
+              SUM(CASE WHEN f.severity='high' AND f.status='open' THEN 1 ELSE 0 END) AS high_open
+            FROM findings f
+            JOIN projects p ON p.gid = f.project_gid
+            WHERE EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+            )
         """)).mappings().one()
         by_rule = conn.execute(text("""
-            SELECT rule_id, COUNT(*) AS n
-            FROM findings
-            WHERE status='open'
-            GROUP BY rule_id
+            SELECT f.rule_id, COUNT(*) AS n
+            FROM findings f
+            JOIN projects p ON p.gid = f.project_gid
+            WHERE f.status='open' AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+            )
+            GROUP BY f.rule_id
             ORDER BY n DESC
         """)).mappings().all()
 
@@ -115,7 +124,10 @@ if page == "Dashboard":
             JOIN projects p ON p.gid = f.project_gid
             LEFT JOIN LATERAL jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
               ON cf->>'name' = 'Sponsor'
-            WHERE f.status='open'
+            WHERE f.status='open' AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf2
+              WHERE cf2->>'name' = 'PMO ID' AND COALESCE(cf2->>'display_value','') <> ''
+            )
             GROUP BY sponsor
             ORDER BY n DESC
         """)).mappings().all()
@@ -124,7 +136,10 @@ if page == "Dashboard":
             SELECT COALESCE(p.status,'(sin status)') AS status, COUNT(*) AS n
             FROM findings f
             JOIN projects p ON p.gid = f.project_gid
-            WHERE f.status='open'
+            WHERE f.status='open' AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+            )
             GROUP BY status
             ORDER BY n DESC
         """)).mappings().all()
@@ -170,6 +185,12 @@ elif page == "Proyectos":
 
     where = ["1=1"]
     params = {"limit": int(limit), "offset": int(offset)}
+    where.append("""
+        EXISTS (
+          SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
+          WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+        )
+    """)
     if project_query.strip():
         where.append("name ILIKE :pname")
         params["pname"] = f"%{project_query.strip()}%"
@@ -324,9 +345,14 @@ elif page == "Findings":
     if project_query.strip():
         where.append("(details->>'project_name') ILIKE :pname")
         params["pname"] = f"%{project_query.strip()}%"
-    join_projects = ""
+    join_projects = "JOIN projects p ON p.gid = f.project_gid"
+    where.append("""
+        EXISTS (
+          SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+          WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+        )
+    """)
     if sponsor_query.strip():
-        join_projects = "JOIN projects p ON p.gid = f.project_gid"
         where.append("""
             EXISTS (
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
@@ -335,16 +361,12 @@ elif page == "Findings":
         """)
         params["sponsor"] = f"%{sponsor_query.strip()}%"
     if project_status_filter != "(todos)":
-        if not join_projects:
-            join_projects = "JOIN projects p ON p.gid = f.project_gid"
         if project_status_filter == "none":
             where.append("p.status IS NULL")
         else:
             where.append("p.status = :pstatus")
             params["pstatus"] = project_status_filter
     if resp_query.strip():
-        if not join_projects:
-            join_projects = "JOIN projects p ON p.gid = f.project_gid"
         where.append("""
             EXISTS (
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
