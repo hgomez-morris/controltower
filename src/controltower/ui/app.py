@@ -264,9 +264,9 @@ elif page == "Findings":
     fcols = st.columns(5)
     rule_filter = fcols[0].selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
     severity_filter = fcols[1].selectbox("Severidad", ["(todas)", "low", "medium", "high"])
-    status_filter = fcols[2].selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
+    project_status_filter = fcols[2].selectbox("Estado proyecto", ["(todos)", "on_track", "at_risk", "off_track", "on_hold", "none"])
     sponsor_query = fcols[3].text_input("Sponsor contiene", value="Abrigo")
-    project_status_filter = fcols[4].selectbox("Estado proyecto", ["(todos)", "on_track", "at_risk", "off_track", "on_hold", "none"])
+    resp_query = fcols[4].text_input("Responsable contiene")
 
     fcols2 = st.columns(2)
     project_query = fcols2[0].text_input("Proyecto contiene")
@@ -280,9 +280,6 @@ elif page == "Findings":
     if severity_filter != "(todas)":
         where.append("severity = :severity")
         params["severity"] = severity_filter
-    if status_filter != "(todas)":
-        where.append("f.status = :status")
-        params["status"] = status_filter
     if project_query.strip():
         where.append("(details->>'project_name') ILIKE :pname")
         params["pname"] = f"%{project_query.strip()}%"
@@ -304,6 +301,16 @@ elif page == "Findings":
         else:
             where.append("p.status = :pstatus")
             params["pstatus"] = project_status_filter
+    if resp_query.strip():
+        if not join_projects:
+            join_projects = "JOIN projects p ON p.gid = f.project_gid"
+        where.append("""
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'Responsable Proyecto' AND COALESCE(cf->>'display_value','') ILIKE :resp
+            )
+        """)
+        params["resp"] = f"%{resp_query.strip()}%"
 
     q = f"""
         SELECT f.id, f.project_gid, f.rule_id, f.severity, f.status, f.created_at, f.details
