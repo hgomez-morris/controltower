@@ -90,7 +90,7 @@ with tab2:
         where.append("""
             EXISTS (
               SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
-              WHERE cf->>'name' = 'Responsable de proyecto' AND COALESCE(cf->>'display_value','') ILIKE :resp
+              WHERE cf->>'name' = 'Responsable Proyecto' AND COALESCE(cf->>'display_value','') ILIKE :resp
             )
         """)
         params["resp"] = f"%{resp_query.strip()}%"
@@ -158,7 +158,7 @@ with tab2:
         cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 1])
         cols[0].write(p.get("name") or "(sin nombre)")
         cols[1].write(cf.get("PMO ID") or "")
-        cols[2].write(cf.get("Responsable de proyecto") or p.get("owner_name") or "")
+        cols[2].write(cf.get("Responsable Proyecto") or p.get("owner_name") or "")
         cols[3].write(cf.get("Sponsor") or "")
         cols[4].write(cf.get("Priority") or cf.get("Prioridad") or "")
         cols[5].write(cf.get("Cliente") or "")
