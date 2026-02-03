@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, uuid, json, logging
+import os, uuid, json, logging, time
 from datetime import datetime, timezone, timedelta
 from datetime import date as dt_date
 from decimal import Decimal
@@ -139,9 +139,13 @@ def main_sync(config: dict) -> str:
         projects = client.list_projects(workspace_gid)
         changes_detected = 0
         total = len(projects)
+        t0 = time.time()
         for i, p in enumerate(projects, start=1):
             if i == 1 or i % 25 == 0 or i == total:
-                log.info("Sync progress: %s/%s projects", i, total)
+                elapsed = time.time() - t0
+                rate = elapsed / i if i else 0
+                eta = int(rate * (total - i)) if total else 0
+                log.info("Sync progress: %s/%s projects | elapsed=%ss eta=%ss", i, total, int(elapsed), eta)
             pgid = p["gid"]
             pfull = client.get_project(pgid)
             if pfull.get("completed") is True:
