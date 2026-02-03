@@ -63,6 +63,18 @@ def _humanize_last_update(ts):
         return f"hace {days}d"
     return str(ts)
 
+def _fmt_date(val):
+    if not val:
+        return ""
+    if isinstance(val, datetime):
+        return val.date().isoformat()
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val.replace("Z", "+00:00")).date().isoformat()
+        except Exception:
+            return val.split("T")[0] if "T" in val else val
+    return str(val)
+
 # Sidebar filters
 with st.sidebar:
     st.header("Filtros")
@@ -190,8 +202,8 @@ with tab2:
         cols[3].write(cf.get("Sponsor") or "")
         cols[4].write(cf.get("Priority") or cf.get("Prioridad") or "")
         cols[5].write(cf.get("Cliente") or "")
-        cols[6].write(cf.get("Fecha Inicio del proyecto") or cf.get("Fecha Inicio") or "")
-        cols[7].write(cf.get("Fecha Planificada Termino del proyecto") or cf.get("Fecha Planificada Termino del proyecto") or "")
+        cols[6].write(_fmt_date(cf.get("Fecha Inicio del proyecto") or cf.get("Fecha Inicio") or ""))
+        cols[7].write(_fmt_date(cf.get("Fecha Planificada Termino del proyecto") or cf.get("Fecha Planificada Termino del proyecto") or ""))
         last_update = _humanize_last_update(p.get("last_status_update_at"))
         status = p.get("status") or ""
         cols[8].write(f"{status} {last_update}".strip())
