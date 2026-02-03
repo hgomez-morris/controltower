@@ -261,8 +261,15 @@ elif page == "Findings":
         except Exception as e:
             st.error(f"Error enviando a Slack: {e}")
 
+    # Build rule list dynamically from config
+    rule_ids = ["(todas)"]
+    try:
+        rule_ids += list((cfg.get("rules") or {}).keys())
+    except Exception:
+        rule_ids += ["no_status_update", "no_activity", "schedule_risk"]
+
     fcols = st.columns(5)
-    rule_filter = fcols[0].selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
+    rule_filter = fcols[0].selectbox("Regla", rule_ids)
     severity_filter = fcols[1].selectbox("Severidad", ["(todas)", "low", "medium", "high"])
     project_status_filter = fcols[2].selectbox("Estado proyecto", ["(todos)", "on_track", "at_risk", "off_track", "on_hold", "none"])
     sponsor_query = fcols[3].text_input("Sponsor contiene", value="Abrigo")
