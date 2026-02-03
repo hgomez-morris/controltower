@@ -96,12 +96,13 @@ if page == "Dashboard":
 elif page == "Proyectos":
     st.subheader("Proyectos")
     # Filters in-page
-    fcols = st.columns(5)
+    fcols = st.columns(6)
     project_query = fcols[0].text_input("Proyecto contiene")
     pmo_id_query = fcols[1].text_input("PMO-ID contiene")
     resp_query = fcols[2].text_input("Responsable contiene")
     client_query = fcols[3].text_input("Cliente contiene")
     sponsor_query = fcols[4].text_input("Sponsor contiene")
+    status_filter = fcols[5].selectbox("Estado", ["(todos)", "on_track", "at_risk", "off_track", "on_hold", "none"])
 
     fcols2 = st.columns(3)
     limit = fcols2[0].number_input("Limite", min_value=20, max_value=200, value=20, step=20)
@@ -150,6 +151,12 @@ elif page == "Proyectos":
             )
         """)
         params["sponsor"] = f"%{sponsor_query.strip()}%"
+    if status_filter != "(todos)":
+        if status_filter == "none":
+            where.append("status IS NULL")
+        else:
+            where.append("status = :status")
+            params["status"] = status_filter
 
     order_by = "last_status_update_at ASC NULLS LAST" if sort_stale else "name ASC"
     with engine.begin() as conn:
