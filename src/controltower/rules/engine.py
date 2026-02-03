@@ -88,6 +88,8 @@ def _rule_no_activity(conn, config: dict, p) -> int:
     if not rule.get("enabled", True):
         return 0
 
+    if p["tasks_created_last_7d"] is None or p["tasks_completed_last_7d"] is None:
+        return 0
     created_7d = int(p["tasks_created_last_7d"] or 0)
     completed_7d = int(p["tasks_completed_last_7d"] or 0)
     if created_7d == 0 and completed_7d == 0:
@@ -111,6 +113,8 @@ def _rule_schedule_risk(conn, config: dict, p) -> int:
     else:
         due_date = due
     days_remaining = (due_date - date.today()).days
+    if p["calculated_progress"] is None:
+        return 0
     progress = float(p["calculated_progress"] or 0.0)
 
     thresholds = sorted(rule["thresholds"], key=lambda x: x["days_remaining"])
