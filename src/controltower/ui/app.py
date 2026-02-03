@@ -42,7 +42,7 @@ with st.sidebar:
     status_filter = st.selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
     project_query = st.text_input("Proyecto contiene")
     owner_query = st.text_input("JP / Owner contiene")
-    limit = st.number_input("Limite", min_value=25, max_value=500, value=100, step=25)
+    limit = st.number_input("Limite", min_value=20, max_value=200, value=20, step=20)
     show_raw = st.checkbox("Mostrar raw del proyecto", value=False)
 
 
@@ -62,14 +62,16 @@ with tab1:
 
 with tab2:
     st.subheader("Proyectos")
+    page = st.number_input("Pagina", min_value=1, value=1, step=1)
+    offset = (int(page) - 1) * int(limit)
     with engine.begin() as conn:
         projects = conn.execute(text("""
             SELECT gid, name, owner_name, due_date, calculated_progress,
                    total_tasks, completed_tasks, last_status_update_at, last_activity_at, status, raw_data
             FROM projects
             ORDER BY name ASC
-            LIMIT :limit
-        """), {"limit": int(limit)}).mappings().all()
+            LIMIT :limit OFFSET :offset
+        """), {"limit": int(limit), "offset": int(offset)}).mappings().all()
 
     df = pd.DataFrame([{
         "gid": p.get("gid"),
@@ -91,10 +93,11 @@ with tab2:
         st.markdown("**Detalle**")
         st.json(_jsonable(p))
         if project_raw:
-            custom_fields = _extract_custom_fields(project_raw)
-            if custom_fields:
-                st.markdown("**Campos personalizados**")
-                st.json(_jsonable(custom_fields))
+            if st.button("Ver campos personalizados"):
+                custom_fields = _extract_custom_fields(project_raw)
+                if custom_fields:
+                    st.markdown("**Campos personalizados**")
+                    st.json(_jsonable(custom_fields))
             if show_raw:
                 st.markdown("**Proyecto (raw)**")
                 st.json(_jsonable(project_raw))
