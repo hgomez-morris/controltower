@@ -22,7 +22,8 @@ def evaluate_rules(config: dict, sync_id: str) -> int:
     with engine.begin() as conn:
         projects = conn.execute(text("""
             SELECT gid, name, owner_name, due_date, calculated_progress, last_status_update_at,
-                   raw_data, last_activity_at, tasks_created_last_7d, tasks_completed_last_7d
+                   raw_data, last_activity_at, tasks_created_last_7d, tasks_completed_last_7d,
+                   total_tasks
             FROM projects
         """)).mappings().all()
 
