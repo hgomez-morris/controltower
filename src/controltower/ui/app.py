@@ -9,6 +9,13 @@ engine = get_engine()
 st.title("PMO Control Tower - MVP")
 
 def _jsonable(obj):
+    if hasattr(obj, "items"):
+        obj = dict(obj)
+    if isinstance(obj, str):
+        try:
+            return json.loads(obj)
+        except Exception:
+            return {"value": obj}
     return json.loads(json.dumps(obj, default=str))
 
 # Sidebar filters
