@@ -1,7 +1,6 @@
-import streamlit as st
+﻿import streamlit as st
 import json
 import os
-import io
 import pandas as pd
 from datetime import datetime, timezone
 from sqlalchemy import text
@@ -107,7 +106,6 @@ if page == "Dashboard":
 
 elif page == "Proyectos":
     st.subheader("Proyectos")
-    # Filters in-page
     fcols = st.columns(6)
     project_query = fcols[0].text_input("Proyecto contiene")
     pmo_id_query = fcols[1].text_input("PMO-ID contiene")
@@ -252,6 +250,7 @@ elif page == "Findings":
             st.success(f"Mensajes enviados: {sent}")
         except Exception as e:
             st.error(f"Error enviando a Slack: {e}")
+
     fcols = st.columns(4)
     rule_filter = fcols[0].selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
     severity_filter = fcols[1].selectbox("Severidad", ["(todas)", "low", "medium", "high"])
@@ -293,6 +292,7 @@ elif page == "Findings":
         rows = conn.execute(text(q), params).mappings().all()
 
     fdf = pd.DataFrame([{
+        "select": False,
         "id": r.get("id"),
         "project_gid": r.get("project_gid"),
         "rule_id": r.get("rule_id"),
@@ -300,92 +300,84 @@ elif page == "Findings":
         "status": r.get("status"),
         "created_at": r.get("created_at"),
     } for r in rows])
-    st.dataframe(fdf, use_container_width=True, height=400)
 
-    if "selected_findings" not in st.session_state:
-        st.session_state["selected_findings"] = set()
+    edited = st.data_editor(
+        fdf,
+        use_container_width=True,
+        height=400,
+        column_config={"select": st.column_config.CheckboxColumn("Seleccionar")},
+        disabled=["id", "project_gid", "rule_id", "severity", "status", "created_at"],
+    )
 
-    @st.dialog("Detalle de finding")
-    def _show_finding_dialog(r):
-        st.json(_jsonable(r["details"] or {}))
+    selected_ids = edited[edited["select"] == True]["id"].tolist() if not edited.empty else []
 
-    st.markdown("**Seleccionar findings**")
-    for r in rows:
-        label = f"{r.get('id')} | {r.get('rule_id')} | {r.get('severity')}"
-        checked = st.checkbox(label, key=f"chk_{r.get('id')}", value=(r.get("id") in st.session_state["selected_findings"]))
-        if checked:
-            st.session_state["selected_findings"].add(r.get("id"))
-        else:
-            st.session_state["selected_findings"].discard(r.get("id"))
-
-    actions_cols = st.columns(3)
-    if actions_cols[0].button("Ver detalle de seleccionado"):
-        sel = list(st.session_state["selected_findings"])
-        if not sel:
+    action_cols = st.columns(3)
+    if action_cols[0].button("Ver detalle"):
+        if not selected_ids:
             st.warning("Selecciona al menos un finding.")
         else:
             rmap = {r.get("id"): r for r in rows}
-            _show_finding_dialog(rmap.get(sel[0]))
+            sel = rmap.get(selected_ids[0])
+            if sel:
+                st.json(_jsonable(sel["details"] or {}))
 
-    if actions_cols[1].button("Enviar seleccionados a Slack"):
-        sel = list(st.session_state["selected_findings"])
-        if not sel:
+    if action_cols[1].button("Enviar seleccionados a Slack"):
+        if not selected_ids:
             st.warning("Selecciona al menos un finding.")
         else:
             try:
-                sent = post_findings_to_slack_by_ids(cfg, sel)
+                sent = post_findings_to_slack_by_ids(cfg, selected_ids)
                 st.success(f"Mensajes enviados: {sent}")
             except Exception as e:
                 st.error(f"Error enviando a Slack: {e}")
 
-    if actions_cols[2].button("Limpiar seleccion"):
-        st.session_state["selected_findings"] = set()
+    if action_cols[2].button("Exportar seleccionados (CSV)"):
+        if not selected_ids:
+            st.warning("Selecciona al menos un finding.")
+        else:
+            project_gids = list({r.get("project_gid") for r in rows if r.get("id") in selected_ids})
+            projects_map = {}
+            if project_gids:
+                with engine.begin() as conn:
+                    proj_rows = conn.execute(text("""
+                        SELECT gid, name, status, last_status_update_at, raw_data
+                        FROM projects
+                        WHERE gid = ANY(:gids)
+                    """), {"gids": project_gids}).mappings().all()
+                projects_map = {p["gid"]: p for p in proj_rows}
 
-    if rows:
-        project_gids = list({r.get("project_gid") for r in rows if r.get("project_gid")})
-        projects_map = {}
-        if project_gids:
-            with engine.begin() as conn:
-                proj_rows = conn.execute(text("""
-                    SELECT gid, name, status, last_status_update_at, raw_data
-                    FROM projects
-                    WHERE gid = ANY(:gids)
-                """), {"gids": project_gids}).mappings().all()
-            projects_map = {p["gid"]: p for p in proj_rows}
+            export_rows = []
+            for r in rows:
+                if r.get("id") not in selected_ids:
+                    continue
+                p = projects_map.get(r.get("project_gid")) or {}
+                export_rows.append({
+                    "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+                    "Proyecto": p.get("name") or "",
+                    "Fecha inicio": _fmt_date(_cf_value_from_project_row(p, "Fecha Inicio del proyecto") or _cf_value_from_project_row(p, "Fecha Inicio")),
+                    "Fecha termino": _fmt_date(_cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto") or _cf_value_from_project_row(p, "Fecha Planificada Término del proyecto")),
+                    "Status": p.get("status") or "",
+                    "Ultima actualizacion": _humanize_last_update(p.get("last_status_update_at")),
+                    "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or "",
+                    "Sponsor": _cf_value_from_project_row(p, "Sponsor") or "",
+                })
 
-        export_rows = []
-        for r in rows:
-            p = projects_map.get(r.get("project_gid")) or {}
-            export_rows.append({
-                "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
-                "Proyecto": p.get("name") or "",
-                "Fecha inicio": _fmt_date(_cf_value_from_project_row(p, "Fecha Inicio del proyecto") or _cf_value_from_project_row(p, "Fecha Inicio")),
-                "Fecha termino": _fmt_date(_cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto") or _cf_value_from_project_row(p, "Fecha Planificada T?rmino del proyecto")),
-                "Status": p.get("status") or "",
-                "Ultima actualizacion": _humanize_last_update(p.get("last_status_update_at")),
-                "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or "",
-                "Sponsor": _cf_value_from_project_row(p, "Sponsor") or "",
-            })
+            csv = pd.DataFrame(export_rows).to_csv(index=False)
+            st.download_button(
+                "Descargar CSV",
+                data=csv,
+                file_name="findings.csv",
+                mime="text/csv",
+            )
 
-        excel_df = pd.DataFrame(export_rows)
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-            excel_df.to_excel(writer, index=False, sheet_name="findings")
-        st.download_button(
-            "Descargar findings (Excel)",
-            data=buf.getvalue(),
-            file_name="findings.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-    # Acknowledge single finding
     ack_cols = st.columns(3)
-    ack_id = ack_cols[0].text_input("ID de finding para Acknowledge")
+    ack_ids = ack_cols[0].text_input("IDs para Acknowledge (coma)")
     ack = ack_cols[1].text_input("Comentario (obligatorio)")
     ack_by = ack_cols[2].text_input("Acknowledged by", value="PMO")
-    if st.button("Acknowledge"):
-        if not ack_id.strip() or not ack.strip():
-            st.error("ID y comentario son obligatorios.")
+    if st.button("Acknowledge seleccionados"):
+        ids = [int(x.strip()) for x in ack_ids.split(",") if x.strip().isdigit()]
+        if not ids or not ack.strip():
+            st.error("IDs y comentario son obligatorios.")
         else:
             with engine.begin() as conn:
                 conn.execute(text("""
@@ -394,7 +386,7 @@ elif page == "Findings":
                         acknowledged_at=NOW(),
                         acknowledged_by=:by,
                         ack_comment=:c
-                    WHERE id=:id
-                """), {"id": int(ack_id), "c": ack, "by": ack_by or "PMO"})
-            st.success("Hallazgo acknowledged.")
+                    WHERE id = ANY(:ids)
+                """), {"ids": ids, "c": ack, "by": ack_by or "PMO"})
+            st.success("Hallazgos acknowledged.")
             st.rerun()
