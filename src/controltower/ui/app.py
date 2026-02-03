@@ -149,7 +149,7 @@ if page == "Dashboard":
     st.markdown("**Desglose por regla (open)**")
     if by_rule:
         df_rules = pd.DataFrame(by_rule).rename(columns={"rule_id": "Regla", "n": "Cantidad de problemas"})
-        st.dataframe(df_rules, use_container_width=True, height=200, hide_index=True)
+        st.dataframe(df_rules, use_container_width=False, width=520, height=200, hide_index=True)
 
     st.markdown("**Distribución por sponsor (open)**")
     if by_sponsor:
@@ -252,18 +252,6 @@ elif page == "Proyectos":
     nav_cols[2].markdown(f"**Pagina:** {page_num}")
     nav_cols[3].markdown(f"**Pagina size:** {int(limit)}")
 
-    header_cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 2, 1])
-    header_cols[0].markdown("**Proyecto**")
-    header_cols[1].markdown("**PMO-ID**")
-    header_cols[2].markdown("**Responsable**")
-    header_cols[3].markdown("**Sponsor**")
-    header_cols[4].markdown("**Prioridad**")
-    header_cols[5].markdown("**Cliente**")
-    header_cols[6].markdown("**Inicio**")
-    header_cols[7].markdown("**Termino Plan**")
-    header_cols[8].markdown("**Status / ultimo update**")
-    header_cols[9].markdown("**Ver**")
-
     if "show_project_gid" not in st.session_state:
         st.session_state["show_project_gid"] = None
 
@@ -284,28 +272,43 @@ elif page == "Proyectos":
             st.session_state["show_project_gid"] = None
             st.rerun()
 
-    for p in projects:
-        project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
-        cf = _custom_field_map(project_raw) if project_raw else {}
-        cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 2, 1])
-        cols[0].write(p.get("name") or "(sin nombre)")
-        cols[1].write(cf.get("PMO ID") or "")
-        cols[2].write(cf.get("Responsable Proyecto") or p.get("owner_name") or "")
-        cols[3].write(cf.get("Sponsor") or "")
-        cols[4].write(cf.get("Priority") or cf.get("Prioridad") or "")
-        cols[5].write(cf.get("cliente_nuevo") or "")
-        cols[6].write(_fmt_date(cf.get("Fecha Inicio del proyecto") or cf.get("Fecha Inicio") or ""))
-        cols[7].write(_fmt_date(cf.get("Fecha Planificada Termino del proyecto") or cf.get("Fecha Planificada Termino del proyecto") or ""))
-        last_update = _humanize_last_update(p.get("last_status_update_at"))
-        status = p.get("status") or ""
-        cols[8].write(f"{status} {last_update}".strip())
-        if cols[9].button("Ver", key=f"view_{p.get('gid')}"):
-            st.session_state["show_project_gid"] = p.get("gid")
-            st.session_state["show_project_row"] = p
-            _show_project_dialog(p)
+    pdf = pd.DataFrame([{
+        "select": False,
+        "pmo_id": _cf_value_from_project_row(p, "PMO ID"),
+        "proyecto": p.get("name") or "",
+        "responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or p.get("owner_name") or "",
+        "sponsor": _cf_value_from_project_row(p, "Sponsor"),
+        "cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
+        "inicio": _fmt_date(_cf_value_from_project_row(p, "Fecha Inicio del proyecto") or _cf_value_from_project_row(p, "Fecha Inicio")),
+        "termino_plan": _fmt_date(_cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto") or _cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto")),
+        "status_ultimo": f\"{p.get('status') or ''} {_humanize_last_update(p.get('last_status_update_at'))}\".strip(),
+        "gid": p.get("gid"),
+    } for p in projects])
 
-    if st.session_state.get("show_project_gid") and st.session_state.get("show_project_row"):
-        _show_project_dialog(st.session_state["show_project_row"])
+    edited_p = st.data_editor(
+        pdf.drop(columns=["gid"]),
+        use_container_width=True,
+        height=420,
+        column_config={"select": st.column_config.CheckboxColumn("")},
+        disabled=["pmo_id", "proyecto", "responsable", "sponsor", "cliente", "inicio", "termino_plan", "status_ultimo"],
+        hide_index=True,
+    )
+
+    selected_gids = []
+    if not edited_p.empty:
+        selected_idx = edited_p[edited_p["select"] == True].index.tolist()
+        selected_gids = [pdf.loc[i, "gid"] for i in selected_idx]
+
+    p_actions = st.columns(2)
+    if p_actions[0].button("Ver detalle"):
+        if not selected_gids:
+            st.warning("Selecciona al menos un proyecto.")
+        else:
+            sel_gid = selected_gids[0]
+            sel = next((x for x in projects if x.get("gid") == sel_gid), None)
+            if sel:
+                _show_project_dialog(sel)
+    p_actions[1].button("Limpiar selección", on_click=lambda: None)
 
 elif page == "Findings":
     st.subheader("Findings")
