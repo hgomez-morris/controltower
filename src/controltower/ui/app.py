@@ -276,15 +276,23 @@ elif page == "Findings":
     if project_query.strip():
         where.append("(details->>'project_name') ILIKE :pname")
         params["pname"] = f"%{project_query.strip()}%"
+    join_projects = ""
     if sponsor_query.strip():
-        where.append("(details->>'sponsor') ILIKE :sponsor")
+        join_projects = "JOIN projects p ON p.gid = f.project_gid"
+        where.append("""
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'Sponsor' AND COALESCE(cf->>'display_value','') ILIKE :sponsor
+            )
+        """)
         params["sponsor"] = f"%{sponsor_query.strip()}%"
 
     q = f"""
-        SELECT id, project_gid, rule_id, severity, status, created_at, details
-        FROM findings
+        SELECT f.id, f.project_gid, f.rule_id, f.severity, f.status, f.created_at, f.details
+        FROM findings f
+        {join_projects}
         WHERE {' AND '.join(where)}
-        ORDER BY created_at DESC
+        ORDER BY f.created_at DESC
         LIMIT :limit
     """
 
@@ -322,6 +330,7 @@ elif page == "Findings":
         "proyecto": (projects_map.get(r.get("project_gid")) or {}).get("name") or "",
         "cliente": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "cliente_nuevo"),
         "responsable": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Responsable Proyecto"),
+        "sponsor": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Sponsor"),
         "regla": r.get("rule_id"),
         "severidad": r.get("severity"),
         "motivo": _rule_message(r, projects_map.get(r.get("project_gid")) or {}),
@@ -332,7 +341,7 @@ elif page == "Findings":
         use_container_width=True,
         height=400,
         column_config={"select": st.column_config.CheckboxColumn("Seleccionar")},
-        disabled=["id", "pmo_id", "proyecto", "cliente", "responsable", "regla", "severidad", "motivo"],
+        disabled=["id", "pmo_id", "proyecto", "cliente", "responsable", "sponsor", "regla", "severidad", "motivo"],
     )
 
     selected_ids = edited[edited["select"] == True]["id"].tolist() if not edited.empty else []
