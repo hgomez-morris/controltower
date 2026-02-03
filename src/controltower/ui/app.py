@@ -62,8 +62,10 @@ with tab1:
 
 with tab2:
     st.subheader("Proyectos")
-    page = st.number_input("Pagina", min_value=1, value=1, step=1)
-    offset = (int(page) - 1) * int(limit)
+    if "page_projects" not in st.session_state:
+        st.session_state["page_projects"] = 1
+    page = int(st.session_state["page_projects"])
+    offset = (page - 1) * int(limit)
     with engine.begin() as conn:
         projects = conn.execute(text("""
             SELECT gid, name, owner_name, due_date, calculated_progress,
@@ -73,24 +75,27 @@ with tab2:
             LIMIT :limit OFFSET :offset
         """), {"limit": int(limit), "offset": int(offset)}).mappings().all()
 
-    df = pd.DataFrame([{
-        "gid": p.get("gid"),
-        "name": p.get("name"),
-        "owner_name": p.get("owner_name"),
-        "status": p.get("status"),
-        "due_date": p.get("due_date"),
-        "last_status_update_at": p.get("last_status_update_at"),
-        "last_activity_at": p.get("last_activity_at"),
-    } for p in projects])
+    nav_cols = st.columns([1, 1, 2])
+    if nav_cols[0].button("Pagina anterior") and page > 1:
+        st.session_state["page_projects"] = page - 1
+        st.rerun()
+    nav_cols[1].button("Pagina siguiente", on_click=lambda: st.session_state.__setitem__("page_projects", page + 1))
+    nav_cols[2].markdown(f"**Pagina:** {page}  |  **Pagina size:** {int(limit)}")
 
-    st.dataframe(df, use_container_width=True, height=400)
+    header_cols = st.columns([4, 2, 2, 2, 2, 1])
+    header_cols[0].markdown("**Proyecto**")
+    header_cols[1].markdown("**Owner**")
+    header_cols[2].markdown("**Status**")
+    header_cols[3].markdown("**Due date**")
+    header_cols[4].markdown("**Ult. actividad**")
+    header_cols[5].markdown("**Ver**")
 
-    if projects:
-        options = {f"{p.get('name','(sin nombre)')} | {p.get('gid')}": p for p in projects}
-        selected = st.selectbox("Ver detalle de proyecto", list(options.keys()))
-        p = options[selected]
+    if "show_project_gid" not in st.session_state:
+        st.session_state["show_project_gid"] = None
+
+    @st.dialog("Detalle de proyecto")
+    def _show_project_dialog(p):
         project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
-        st.markdown("**Detalle**")
         st.json(_jsonable(p))
         if project_raw:
             if st.button("Ver campos personalizados"):
@@ -101,6 +106,24 @@ with tab2:
             if show_raw:
                 st.markdown("**Proyecto (raw)**")
                 st.json(_jsonable(project_raw))
+        if st.button("Cerrar"):
+            st.session_state["show_project_gid"] = None
+            st.rerun()
+
+    for p in projects:
+        cols = st.columns([4, 2, 2, 2, 2, 1])
+        cols[0].write(p.get("name") or "(sin nombre)")
+        cols[1].write(p.get("owner_name") or "")
+        cols[2].write(p.get("status") or "")
+        cols[3].write(p.get("due_date") or "")
+        cols[4].write(p.get("last_activity_at") or "")
+        if cols[5].button("Ver", key=f"view_{p.get('gid')}"):
+            st.session_state["show_project_gid"] = p.get("gid")
+            st.session_state["show_project_row"] = p
+            _show_project_dialog(p)
+
+    if st.session_state.get("show_project_gid") and st.session_state.get("show_project_row"):
+        _show_project_dialog(st.session_state["show_project_row"])
 
 with tab3:
     st.subheader("Hallazgos")
