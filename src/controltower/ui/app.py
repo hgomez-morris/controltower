@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import io
 import plotly.express as px
+from openpyxl.utils import get_column_letter
 from datetime import datetime, timezone
 from sqlalchemy import text
 from controltower.db.connection import get_engine
@@ -544,6 +545,18 @@ elif page == "Findings":
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
             df_export.to_excel(writer, index=False, sheet_name="findings")
+            ws = writer.sheets["findings"]
+            widths = {
+                "PMO-ID": 70,
+                "Nombre de proyecto": 400,
+                "Cliente": 160,
+                "Responsable del proyecto": 160,
+                "Sponsor": 160,
+            }
+            for idx, col in enumerate(df_export.columns, start=1):
+                col_name = str(col)
+                if col_name in widths:
+                    ws.column_dimensions[get_column_letter(idx)].width = widths[col_name]
         st.download_button(
             "Descargar Excel",
             data=buf.getvalue(),
