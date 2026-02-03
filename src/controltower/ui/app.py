@@ -358,7 +358,7 @@ elif page == "Findings":
         "select": False,
         "id": r.get("id"),
         "pmo_id": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "PMO ID"),
-        "proyecto": (projects_map.get(r.get("project_gid")) or {}).get("name") or "",
+        "proyecto": f"{(projects_map.get(r.get('project_gid')) or {}).get('name') or ''} ({(projects_map.get(r.get('project_gid')) or {}).get('status') or ''})".strip(),
         "cliente": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "cliente_nuevo"),
         "responsable": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Responsable Proyecto"),
         "sponsor": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Sponsor"),
@@ -371,9 +371,11 @@ elif page == "Findings":
         fdf,
         use_container_width=True,
         height=400,
-        column_config={"select": st.column_config.CheckboxColumn("Seleccionar")},
+        column_config={"select": st.column_config.CheckboxColumn("")},
         disabled=["id", "pmo_id", "proyecto", "cliente", "responsable", "sponsor", "regla", "severidad", "motivo"],
+        hide_index=True,
     )
+    st.caption(f"Total registros: {len(fdf)}")
 
     selected_ids = edited[edited["select"] == True]["id"].tolist() if not edited.empty else []
 
