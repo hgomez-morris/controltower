@@ -38,24 +38,6 @@ def _custom_field_map(project_raw):
     fields = _extract_custom_fields(project_raw)
     return {f["name"]: f["value"] for f in fields}
 
-def _build_custom_fields_dictionary(rows):
-    d = {}
-    for p in rows:
-        project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
-        if not project_raw:
-            continue
-        for f in project_raw.get("custom_fields") or []:
-            gid = f.get("gid")
-            if not gid:
-                continue
-            d.setdefault(gid, {
-                "gid": gid,
-                "name": f.get("name"),
-                "type": f.get("type"),
-                "enum_options": f.get("enum_options"),
-            })
-    return d
-
 # Sidebar filters
 with st.sidebar:
     st.header("Filtros")
@@ -63,6 +45,9 @@ with st.sidebar:
     severity_filter = st.selectbox("Severidad", ["(todas)", "low", "medium", "high"])
     status_filter = st.selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
     project_query = st.text_input("Proyecto contiene")
+    pmo_id_query = st.text_input("PMO-ID contiene")
+    resp_query = st.text_input("Responsable contiene")
+    client_query = st.text_input("Cliente contiene")
     owner_query = st.text_input("JP / Owner contiene")
     limit = st.number_input("Limite", min_value=20, max_value=200, value=20, step=20)
     show_raw = st.checkbox("Mostrar raw del proyecto", value=False)
@@ -88,14 +73,45 @@ with tab2:
         st.session_state["page_projects"] = 1
     page = int(st.session_state["page_projects"])
     offset = (page - 1) * int(limit)
+    where = ["1=1"]
+    params = {"limit": int(limit), "offset": int(offset)}
+    if project_query.strip():
+        where.append("name ILIKE :pname")
+        params["pname"] = f"%{project_query.strip()}%"
+    if pmo_id_query.strip():
+        where.append("""
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') ILIKE :pmo
+            )
+        """)
+        params["pmo"] = f"%{pmo_id_query.strip()}%"
+    if resp_query.strip():
+        where.append("""
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'Responsable de proyecto' AND COALESCE(cf->>'display_value','') ILIKE :resp
+            )
+        """)
+        params["resp"] = f"%{resp_query.strip()}%"
+    if client_query.strip():
+        where.append("""
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'Cliente' AND COALESCE(cf->>'display_value','') ILIKE :client
+            )
+        """)
+        params["client"] = f"%{client_query.strip()}%"
+
     with engine.begin() as conn:
-        projects = conn.execute(text("""
+        projects = conn.execute(text(f"""
             SELECT gid, name, owner_name, due_date, calculated_progress,
                    total_tasks, completed_tasks, last_status_update_at, last_activity_at, status, raw_data
             FROM projects
+            WHERE {' AND '.join(where)}
             ORDER BY name ASC
             LIMIT :limit OFFSET :offset
-        """), {"limit": int(limit), "offset": int(offset)}).mappings().all()
+        """), params).mappings().all()
 
     nav_cols = st.columns([1, 1, 2, 2])
     if nav_cols[0].button("Pagina anterior") and page > 1:
@@ -155,15 +171,6 @@ with tab2:
 
     if st.session_state.get("show_project_gid") and st.session_state.get("show_project_row"):
         _show_project_dialog(st.session_state["show_project_row"])
-
-    if st.button("Generar diccionario de campos (custom fields)"):
-        d = _build_custom_fields_dictionary(projects)
-        st.download_button(
-            "Descargar diccionario",
-            data=json.dumps(d, ensure_ascii=False, indent=2),
-            file_name="asana_custom_fields.json",
-            mime="application/json",
-        )
 
 with tab3:
     st.subheader("Hallazgos")
