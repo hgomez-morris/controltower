@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import pandas as pd
+from datetime import datetime, timezone
 from sqlalchemy import text
 from controltower.db.connection import get_engine
 
@@ -38,6 +39,30 @@ def _custom_field_map(project_raw):
     fields = _extract_custom_fields(project_raw)
     return {f["name"]: f["value"] for f in fields}
 
+def _humanize_last_update(ts):
+    if not ts:
+        return ""
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            return str(ts)
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = now - ts.astimezone(timezone.utc)
+        days = delta.days
+        if days <= 0:
+            hours = int(delta.total_seconds() // 3600)
+            if hours <= 0:
+                return "hoy"
+            return f"hace {hours}h"
+        if days == 1:
+            return "ayer"
+        return f"hace {days}d"
+    return str(ts)
+
 # Sidebar filters
 with st.sidebar:
     st.header("Filtros")
@@ -51,6 +76,7 @@ with st.sidebar:
     owner_query = st.text_input("JP / Owner contiene")
     limit = st.number_input("Limite", min_value=20, max_value=200, value=20, step=20)
     show_raw = st.checkbox("Mostrar raw del proyecto", value=False)
+    sort_stale = st.checkbox("Ordenar por ultimo update (mas antiguo primero)", value=False)
 
 
 tab1, tab2, tab3 = st.tabs(["Dashboard", "Projects", "Findings"])
@@ -103,13 +129,14 @@ with tab2:
         """)
         params["client"] = f"%{client_query.strip()}%"
 
+    order_by = "last_status_update_at ASC NULLS LAST" if sort_stale else "name ASC"
     with engine.begin() as conn:
         projects = conn.execute(text(f"""
             SELECT gid, name, owner_name, due_date, calculated_progress,
                    total_tasks, completed_tasks, last_status_update_at, last_activity_at, status, raw_data
             FROM projects
             WHERE {' AND '.join(where)}
-            ORDER BY name ASC
+            ORDER BY {order_by}
             LIMIT :limit OFFSET :offset
         """), params).mappings().all()
 
@@ -121,7 +148,7 @@ with tab2:
     nav_cols[2].markdown(f"**Pagina:** {page}")
     nav_cols[3].markdown(f"**Pagina size:** {int(limit)}")
 
-    header_cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 1])
+    header_cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 2, 1])
     header_cols[0].markdown("**Proyecto**")
     header_cols[1].markdown("**PMO-ID**")
     header_cols[2].markdown("**Responsable**")
@@ -130,7 +157,8 @@ with tab2:
     header_cols[5].markdown("**Cliente**")
     header_cols[6].markdown("**Inicio**")
     header_cols[7].markdown("**Termino Plan**")
-    header_cols[8].markdown("**Ver**")
+    header_cols[8].markdown("**Status / ultimo update**")
+    header_cols[9].markdown("**Ver**")
 
     if "show_project_gid" not in st.session_state:
         st.session_state["show_project_gid"] = None
@@ -155,7 +183,7 @@ with tab2:
     for p in projects:
         project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
         cf = _custom_field_map(project_raw) if project_raw else {}
-        cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 1])
+        cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 2, 1])
         cols[0].write(p.get("name") or "(sin nombre)")
         cols[1].write(cf.get("PMO ID") or "")
         cols[2].write(cf.get("Responsable Proyecto") or p.get("owner_name") or "")
@@ -163,8 +191,11 @@ with tab2:
         cols[4].write(cf.get("Priority") or cf.get("Prioridad") or "")
         cols[5].write(cf.get("Cliente") or "")
         cols[6].write(cf.get("Fecha Inicio del proyecto") or cf.get("Fecha Inicio") or "")
-        cols[7].write(cf.get("Fecha Planificada Termino del proyecto") or cf.get("Fecha Planificada T?rmino del proyecto") or "")
-        if cols[8].button("Ver", key=f"view_{p.get('gid')}"):
+        cols[7].write(cf.get("Fecha Planificada Termino del proyecto") or cf.get("Fecha Planificada Termino del proyecto") or "")
+        last_update = _humanize_last_update(p.get("last_status_update_at"))
+        status = p.get("status") or ""
+        cols[8].write(f"{status} {last_update}".strip())
+        if cols[9].button("Ver", key=f"view_{p.get('gid')}"):
             st.session_state["show_project_gid"] = p.get("gid")
             st.session_state["show_project_row"] = p
             _show_project_dialog(p)
