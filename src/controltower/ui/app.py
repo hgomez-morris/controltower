@@ -133,14 +133,14 @@ if page == "Dashboard":
         """)).mappings().all()
 
         by_project_status = conn.execute(text("""
-            SELECT COALESCE(p.status,'(sin status)') AS status, COUNT(*) AS n
+            SELECT COALESCE(p.status,'(sin status)') AS project_status, COUNT(*) AS n
             FROM findings f
             JOIN projects p ON p.gid = f.project_gid
             WHERE f.status='open' AND EXISTS (
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
               WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
             )
-            GROUP BY status
+            GROUP BY project_status
             ORDER BY n DESC
         """)).mappings().all()
     c1, c2 = st.columns(2)
@@ -160,7 +160,7 @@ if page == "Dashboard":
     st.markdown("**Distribución por estado del proyecto (open)**")
     if by_project_status:
         df_status = pd.DataFrame(by_project_status).rename(columns={"n": "Cantidad"})
-        fig_status = px.pie(df_status, values="Cantidad", names="status")
+        fig_status = px.pie(df_status, values="Cantidad", names="project_status")
         st.plotly_chart(fig_status, use_container_width=True)
 
 elif page == "Proyectos":
