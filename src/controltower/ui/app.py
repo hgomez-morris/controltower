@@ -18,6 +18,21 @@ def _jsonable(obj):
             return {"value": obj}
     return json.loads(json.dumps(obj, default=str))
 
+def _extract_custom_fields(project_raw):
+    try:
+        fields = (project_raw or {}).get("custom_fields") or []
+    except Exception:
+        return []
+    out = []
+    for f in fields:
+        name = f.get("name") or "(sin nombre)"
+        if f.get("display_value") is not None:
+            val = f.get("display_value")
+        else:
+            val = f.get("text_value") or f.get("number_value") or f.get("enum_value") or f.get("multi_enum_values") or f.get("date_value")
+        out.append({"name": name, "value": val})
+    return out
+
 # Sidebar filters
 with st.sidebar:
     st.header("Filtros")
@@ -48,7 +63,7 @@ with tab2:
     with engine.begin() as conn:
         projects = conn.execute(text("""
             SELECT gid, name, owner_name, due_date, calculated_progress,
-                   total_tasks, completed_tasks, last_status_update_at, last_activity_at
+                   total_tasks, completed_tasks, last_status_update_at, last_activity_at, status, raw_data
             FROM projects
             ORDER BY name ASC
             LIMIT :limit
@@ -57,7 +72,15 @@ with tab2:
     for p in projects:
         title = f"{p['name']}" if p["name"] else "(sin nombre)"
         with st.expander(title):
+            project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
             st.json(_jsonable(p))
+            if project_raw:
+                st.markdown("**Proyecto (raw)**")
+                st.json(_jsonable(project_raw))
+                custom_fields = _extract_custom_fields(project_raw)
+                if custom_fields:
+                    st.markdown("**Campos personalizados**")
+                    st.json(_jsonable(custom_fields))
 
 with tab3:
     st.subheader("Hallazgos")
