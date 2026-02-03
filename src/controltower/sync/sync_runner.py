@@ -96,7 +96,7 @@ def upsert_project(conn, project: dict) -> None:
         :gid, :name, :owner_gid, :owner_name, :due_date, :status, :calculated_progress,
         :last_status_update_at, :last_status_update_by, :last_activity_at,
         :total_tasks, :completed_tasks, :tasks_created_last_7d, :tasks_completed_last_7d,
-        :raw_data::jsonb, :synced_at
+        CAST(:raw_data AS jsonb), :synced_at
     )
     ON CONFLICT (gid) DO UPDATE SET
         name = EXCLUDED.name,
