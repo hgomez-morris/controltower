@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from controltower.db.connection import get_engine
 from controltower.config import load_config
-from controltower.actions.slack import post_new_findings_to_slack
+from controltower.actions.slack import post_new_findings_to_slack, post_findings_to_slack_by_ids
 
 st.set_page_config(page_title="PMO Control Tower (MVP)", layout="wide")
 engine = get_engine()
@@ -302,6 +302,45 @@ elif page == "Findings":
     } for r in rows])
     st.dataframe(fdf, use_container_width=True, height=400)
 
+    if "selected_findings" not in st.session_state:
+        st.session_state["selected_findings"] = set()
+
+    @st.dialog("Detalle de finding")
+    def _show_finding_dialog(r):
+        st.json(_jsonable(r["details"] or {}))
+
+    st.markdown("**Seleccionar findings**")
+    for r in rows:
+        label = f"{r.get('id')} | {r.get('rule_id')} | {r.get('severity')}"
+        checked = st.checkbox(label, key=f"chk_{r.get('id')}", value=(r.get("id") in st.session_state["selected_findings"]))
+        if checked:
+            st.session_state["selected_findings"].add(r.get("id"))
+        else:
+            st.session_state["selected_findings"].discard(r.get("id"))
+
+    actions_cols = st.columns(3)
+    if actions_cols[0].button("Ver detalle de seleccionado"):
+        sel = list(st.session_state["selected_findings"])
+        if not sel:
+            st.warning("Selecciona al menos un finding.")
+        else:
+            rmap = {r.get("id"): r for r in rows}
+            _show_finding_dialog(rmap.get(sel[0]))
+
+    if actions_cols[1].button("Enviar seleccionados a Slack"):
+        sel = list(st.session_state["selected_findings"])
+        if not sel:
+            st.warning("Selecciona al menos un finding.")
+        else:
+            try:
+                sent = post_findings_to_slack_by_ids(cfg, sel)
+                st.success(f"Mensajes enviados: {sent}")
+            except Exception as e:
+                st.error(f"Error enviando a Slack: {e}")
+
+    if actions_cols[2].button("Limpiar seleccion"):
+        st.session_state["selected_findings"] = set()
+
     if rows:
         project_gids = list({r.get("project_gid") for r in rows if r.get("project_gid")})
         projects_map = {}
@@ -339,25 +378,23 @@ elif page == "Findings":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-    for r in rows:
-        details = r["details"] or {}
-        title = f"[{r['severity'].upper()}] {details.get('project_name','(sin nombre)')} - {r['rule_id']}"
-        with st.expander(title):
-            st.json(_jsonable(details))
-            ack = st.text_input("Comentario para Acknowledge (obligatorio)", key=f"ack_{r['id']}")
-            ack_by = st.text_input("Acknowledged by", key=f"ackby_{r['id']}", value="PMO")
-            if st.button("Acknowledge", key=f"btn_{r['id']}"):
-                if not ack.strip():
-                    st.error("Comentario obligatorio.")
-                else:
-                    with engine.begin() as conn:
-                        conn.execute(text("""
-                            UPDATE findings
-                            SET status='acknowledged',
-                                acknowledged_at=NOW(),
-                                acknowledged_by=:by,
-                                ack_comment=:c
-                            WHERE id=:id
-                        """), {"id": r["id"], "c": ack, "by": ack_by or "PMO"})
-                    st.success("Hallazgo acknowledged.")
-                    st.rerun()
+    # Acknowledge single finding
+    ack_cols = st.columns(3)
+    ack_id = ack_cols[0].text_input("ID de finding para Acknowledge")
+    ack = ack_cols[1].text_input("Comentario (obligatorio)")
+    ack_by = ack_cols[2].text_input("Acknowledged by", value="PMO")
+    if st.button("Acknowledge"):
+        if not ack_id.strip() or not ack.strip():
+            st.error("ID y comentario son obligatorios.")
+        else:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE findings
+                    SET status='acknowledged',
+                        acknowledged_at=NOW(),
+                        acknowledged_by=:by,
+                        ack_comment=:c
+                    WHERE id=:id
+                """), {"id": int(ack_id), "c": ack, "by": ack_by or "PMO"})
+            st.success("Hallazgo acknowledged.")
+            st.rerun()
