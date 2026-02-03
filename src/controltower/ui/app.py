@@ -140,6 +140,14 @@ with tab2:
             )
         """)
         params["client"] = f"%{client_query.strip()}%"
+    if sponsor_query.strip():
+        where.append("""
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
+              WHERE cf->>'name' = 'Sponsor' AND COALESCE(cf->>'display_value','') ILIKE :sponsor
+            )
+        """)
+        params["sponsor"] = f"%{sponsor_query.strip()}%"
 
     order_by = "last_status_update_at ASC NULLS LAST" if sort_stale else "name ASC"
     with engine.begin() as conn:
