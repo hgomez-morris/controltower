@@ -9,7 +9,7 @@ def build_db_url() -> str:
     name = os.getenv("DB_NAME", "controltower")
     user = os.getenv("DB_USER", "controltower")
     pwd = os.getenv("DB_PASSWORD", "controltower")
-    return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port}/{name}"
+    return f"postgresql+psycopg://{user}:{pwd}@{host}:{port}/{name}"
 
 def get_engine() -> Engine:
     return create_engine(build_db_url(), future=True)
