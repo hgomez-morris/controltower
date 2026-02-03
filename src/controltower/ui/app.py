@@ -493,16 +493,16 @@ elif page == "Findings":
         if project_gids:
             with engine.begin() as conn:
                 proj_rows = conn.execute(text("""
-                    SELECT gid, name, raw_data
+                    SELECT gid, name, raw_data, last_status_update_at, total_tasks
                     FROM projects
                     WHERE gid = ANY(:gids)
                 """), {"gids": project_gids}).mappings().all()
             projects_map = {p["gid"]: p for p in proj_rows}
 
         # Build rule columns from config
-        rule_cols = [r for r in (cfg.get("rules") or {}).keys()]
+        rule_cols = [r for r in (cfg.get("rules") or {}).keys() if r != "schedule_risk"]
         if not rule_cols:
-            rule_cols = ["no_status_update", "no_activity", "schedule_risk", "amount_of_tasks"]
+            rule_cols = ["no_status_update", "no_activity", "amount_of_tasks"]
 
         # Aggregate per project
         by_project = {}
@@ -512,12 +512,25 @@ elif page == "Findings":
                 continue
             p = projects_map.get(gid) or {}
             if gid not in by_project:
+                last_update = p.get("last_status_update_at")
+                days_since = ""
+                if last_update:
+                    if isinstance(last_update, str):
+                        try:
+                            last_update = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
+                        except Exception:
+                            last_update = None
+                    if isinstance(last_update, datetime):
+                        days_since = (datetime.now(timezone.utc) - last_update.astimezone(timezone.utc)).days
+                total_tasks = p.get("total_tasks")
                 by_project[gid] = {
                     "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
                     "Nombre de proyecto": p.get("name") or "",
                     "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
                     "Responsable del proyecto": _cf_value_from_project_row(p, "Responsable Proyecto"),
                     "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+                    "Dias desde ultimo update": days_since,
+                    "Cantidad de tareas": total_tasks if total_tasks is not None else "",
                 }
                 for rc in rule_cols:
                     by_project[gid][rc] = ""
