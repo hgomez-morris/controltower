@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import os
+import io
 import pandas as pd
 from datetime import datetime, timezone
 from sqlalchemy import text
@@ -78,6 +79,13 @@ def _fmt_date(val):
         except Exception:
             return val.split("T")[0] if "T" in val else val
     return str(val)
+
+def _cf_value_from_project_row(p, field_name):
+    project_raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
+    if not project_raw:
+        return ""
+    cf = _custom_field_map(project_raw)
+    return cf.get(field_name, "")
 
 # Sidebar menu only
 with st.sidebar:
@@ -293,6 +301,43 @@ elif page == "Findings":
         "created_at": r.get("created_at"),
     } for r in rows])
     st.dataframe(fdf, use_container_width=True, height=400)
+
+    if rows:
+        project_gids = list({r.get("project_gid") for r in rows if r.get("project_gid")})
+        projects_map = {}
+        if project_gids:
+            with engine.begin() as conn:
+                proj_rows = conn.execute(text("""
+                    SELECT gid, name, status, last_status_update_at, raw_data
+                    FROM projects
+                    WHERE gid = ANY(:gids)
+                """), {"gids": project_gids}).mappings().all()
+            projects_map = {p["gid"]: p for p in proj_rows}
+
+        export_rows = []
+        for r in rows:
+            p = projects_map.get(r.get("project_gid")) or {}
+            export_rows.append({
+                "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+                "Proyecto": p.get("name") or "",
+                "Fecha inicio": _fmt_date(_cf_value_from_project_row(p, "Fecha Inicio del proyecto") or _cf_value_from_project_row(p, "Fecha Inicio")),
+                "Fecha termino": _fmt_date(_cf_value_from_project_row(p, "Fecha Planificada Termino del proyecto") or _cf_value_from_project_row(p, "Fecha Planificada T?rmino del proyecto")),
+                "Status": p.get("status") or "",
+                "Ultima actualizacion": _humanize_last_update(p.get("last_status_update_at")),
+                "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or "",
+                "Sponsor": _cf_value_from_project_row(p, "Sponsor") or "",
+            })
+
+        excel_df = pd.DataFrame(export_rows)
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+            excel_df.to_excel(writer, index=False, sheet_name="findings")
+        st.download_button(
+            "Descargar findings (Excel)",
+            data=buf.getvalue(),
+            file_name="findings.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     for r in rows:
         details = r["details"] or {}
