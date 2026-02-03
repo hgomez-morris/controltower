@@ -75,25 +75,13 @@ def _fmt_date(val):
             return val.split("T")[0] if "T" in val else val
     return str(val)
 
-# Sidebar filters
+# Sidebar menu only
 with st.sidebar:
-    st.header("Filtros")
-    rule_filter = st.selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
-    severity_filter = st.selectbox("Severidad", ["(todas)", "low", "medium", "high"])
-    status_filter = st.selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
-    project_query = st.text_input("Proyecto contiene")
-    pmo_id_query = st.text_input("PMO-ID contiene")
-    resp_query = st.text_input("Responsable contiene")
-    client_query = st.text_input("Cliente contiene")
-    sponsor_query = st.text_input("Sponsor contiene")
-    limit = st.number_input("Limite", min_value=20, max_value=200, value=20, step=20)
-    show_raw = st.checkbox("Mostrar raw del proyecto", value=False)
-    sort_stale = st.checkbox("Ordenar por ultimo update (mas antiguo primero)", value=False)
+    st.header("Menu")
+    page = st.radio("Ir a", ["Dashboard", "Proyectos", "Findings"], label_visibility="collapsed")
 
-
-tab1, tab2, tab3 = st.tabs(["Dashboard", "Projects", "Findings"])
-
-with tab1:
+if page == "Dashboard":
+    st.subheader("Dashboard")
     with engine.begin() as conn:
         counts = conn.execute(text("""
             SELECT
@@ -105,12 +93,26 @@ with tab1:
     c1.metric("Hallazgos abiertos", counts["open_findings"] or 0)
     c2.metric("Hallazgos alta severidad", counts["high_open"] or 0)
 
-with tab2:
+elif page == "Proyectos":
     st.subheader("Proyectos")
+    # Filters in-page
+    fcols = st.columns(5)
+    project_query = fcols[0].text_input("Proyecto contiene")
+    pmo_id_query = fcols[1].text_input("PMO-ID contiene")
+    resp_query = fcols[2].text_input("Responsable contiene")
+    client_query = fcols[3].text_input("Cliente contiene")
+    sponsor_query = fcols[4].text_input("Sponsor contiene")
+
+    fcols2 = st.columns(3)
+    limit = fcols2[0].number_input("Limite", min_value=20, max_value=200, value=20, step=20)
+    sort_stale = fcols2[1].checkbox("Ordenar por ultimo update (mas antiguo primero)", value=False)
+    show_raw = fcols2[2].checkbox("Mostrar raw del proyecto", value=False)
+
     if "page_projects" not in st.session_state:
         st.session_state["page_projects"] = 1
-    page = int(st.session_state["page_projects"])
-    offset = (page - 1) * int(limit)
+    page_num = int(st.session_state["page_projects"])
+    offset = (page_num - 1) * int(limit)
+
     where = ["1=1"]
     params = {"limit": int(limit), "offset": int(offset)}
     if project_query.strip():
@@ -161,11 +163,11 @@ with tab2:
         """), params).mappings().all()
 
     nav_cols = st.columns([1, 1, 2, 2])
-    if nav_cols[0].button("Pagina anterior") and page > 1:
-        st.session_state["page_projects"] = page - 1
+    if nav_cols[0].button("Pagina anterior") and page_num > 1:
+        st.session_state["page_projects"] = page_num - 1
         st.rerun()
-    nav_cols[1].button("Pagina siguiente", on_click=lambda: st.session_state.__setitem__("page_projects", page + 1))
-    nav_cols[2].markdown(f"**Pagina:** {page}")
+    nav_cols[1].button("Pagina siguiente", on_click=lambda: st.session_state.__setitem__("page_projects", page_num + 1))
+    nav_cols[2].markdown(f"**Pagina:** {page_num}")
     nav_cols[3].markdown(f"**Pagina size:** {int(limit)}")
 
     header_cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2, 2, 1])
@@ -223,8 +225,18 @@ with tab2:
     if st.session_state.get("show_project_gid") and st.session_state.get("show_project_row"):
         _show_project_dialog(st.session_state["show_project_row"])
 
-with tab3:
-    st.subheader("Hallazgos")
+elif page == "Findings":
+    st.subheader("Findings")
+    fcols = st.columns(4)
+    rule_filter = fcols[0].selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
+    severity_filter = fcols[1].selectbox("Severidad", ["(todas)", "low", "medium", "high"])
+    status_filter = fcols[2].selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
+    sponsor_query = fcols[3].text_input("Sponsor contiene")
+
+    fcols2 = st.columns(3)
+    project_query = fcols2[0].text_input("Proyecto contiene")
+    limit = fcols2[1].number_input("Limite", min_value=20, max_value=200, value=20, step=20)
+
     where = ["1=1"]
     params = {"limit": int(limit)}
 
