@@ -38,6 +38,11 @@ rules:
         min_progress: 40
         severity: low
 
+  amount_of_tasks:
+    enabled: true
+    max_tasks: 3
+    base_severity: medium
+
 visibility:
   # MVP: only JP and PMO
   notify_jp: true

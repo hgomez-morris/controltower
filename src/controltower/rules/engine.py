@@ -30,6 +30,7 @@ def evaluate_rules(config: dict, sync_id: str) -> int:
             created += _rule_no_status_update(conn, config, p)
             created += _rule_no_activity(conn, config, p)
             created += _rule_schedule_risk(conn, config, p)
+            created += _rule_amount_of_tasks(conn, config, p)
 
         conn.execute(text("""UPDATE sync_log SET findings_created=:n WHERE sync_id=:sync_id"""),
                      {"n": created, "sync_id": sync_id})
@@ -129,4 +130,21 @@ def _rule_schedule_risk(conn, config: dict, p) -> int:
                 "progress": progress,
                 "min_progress_required": float(t["min_progress"]),
             })
+    return 0
+
+def _rule_amount_of_tasks(conn, config: dict, p) -> int:
+    rule = config["rules"]["amount_of_tasks"]
+    if not rule.get("enabled", True):
+        return 0
+    total = p["total_tasks"]
+    if total is None:
+        return 0
+    max_tasks = int(rule.get("max_tasks", 3))
+    if int(total) <= max_tasks:
+        return _create_or_update_finding(conn, p["gid"], "amount_of_tasks", rule["base_severity"], {
+            "project_name": p["name"],
+            "owner_name": p["owner_name"],
+            "total_tasks": int(total),
+            "max_tasks": max_tasks,
+        })
     return 0
