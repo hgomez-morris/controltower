@@ -1,4 +1,5 @@
-﻿import streamlit as st
+import streamlit as st
+import json
 from sqlalchemy import text
 from controltower.db.connection import get_engine
 
@@ -6,6 +7,9 @@ st.set_page_config(page_title="PMO Control Tower (MVP)", layout="wide")
 engine = get_engine()
 
 st.title("PMO Control Tower - MVP")
+
+def _jsonable(obj):
+    return json.loads(json.dumps(obj, default=str))
 
 # Sidebar filters
 with st.sidebar:
@@ -46,7 +50,7 @@ with tab2:
     for p in projects:
         title = f"{p['name']}" if p["name"] else "(sin nombre)"
         with st.expander(title):
-            st.json(p)
+            st.json(_jsonable(p))
 
 with tab3:
     st.subheader("Hallazgos")
@@ -84,7 +88,7 @@ with tab3:
         details = r["details"] or {}
         title = f"[{r['severity'].upper()}] {details.get('project_name','(sin nombre)')} - {r['rule_id']}"
         with st.expander(title):
-            st.json(details)
+            st.json(_jsonable(details))
             ack = st.text_input("Comentario para Acknowledge (obligatorio)", key=f"ack_{r['id']}")
             ack_by = st.text_input("Acknowledged by", key=f"ackby_{r['id']}", value="PMO")
             if st.button("Acknowledge", key=f"btn_{r['id']}"):
