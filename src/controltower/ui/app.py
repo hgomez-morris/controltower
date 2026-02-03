@@ -261,18 +261,18 @@ elif page == "Findings":
         except Exception as e:
             st.error(f"Error enviando a Slack: {e}")
 
-    fcols = st.columns(4)
+    fcols = st.columns(5)
     rule_filter = fcols[0].selectbox("Regla", ["(todas)", "no_status_update", "no_activity", "schedule_risk"])
     severity_filter = fcols[1].selectbox("Severidad", ["(todas)", "low", "medium", "high"])
     status_filter = fcols[2].selectbox("Estado", ["open", "acknowledged", "resolved", "(todas)"])
     sponsor_query = fcols[3].text_input("Sponsor contiene", value="Abrigo")
+    project_status_filter = fcols[4].selectbox("Estado proyecto", ["(todos)", "on_track", "at_risk", "off_track", "on_hold", "none"])
 
-    fcols2 = st.columns(3)
+    fcols2 = st.columns(2)
     project_query = fcols2[0].text_input("Proyecto contiene")
-    limit = fcols2[1].number_input("Limite", min_value=20, max_value=200, value=20, step=20)
 
     where = ["1=1"]
-    params = {"limit": int(limit)}
+    params = {}
 
     if rule_filter != "(todas)":
         where.append("rule_id = :rule_id")
@@ -296,6 +296,14 @@ elif page == "Findings":
             )
         """)
         params["sponsor"] = f"%{sponsor_query.strip()}%"
+    if project_status_filter != "(todos)":
+        if not join_projects:
+            join_projects = "JOIN projects p ON p.gid = f.project_gid"
+        if project_status_filter == "none":
+            where.append("p.status IS NULL")
+        else:
+            where.append("p.status = :pstatus")
+            params["pstatus"] = project_status_filter
 
     q = f"""
         SELECT f.id, f.project_gid, f.rule_id, f.severity, f.status, f.created_at, f.details
@@ -303,7 +311,6 @@ elif page == "Findings":
         {join_projects}
         WHERE {' AND '.join(where)}
         ORDER BY f.created_at DESC
-        LIMIT :limit
     """
 
     with engine.begin() as conn:
