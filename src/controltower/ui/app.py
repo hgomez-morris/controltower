@@ -89,6 +89,17 @@ def _cf_value_from_project_row(p, field_name):
     cf = _custom_field_map(project_raw)
     return cf.get(field_name, "")
 
+def _fmt_status(val):
+    if not val:
+        return "-"
+    mapping = {
+        "on_track": "On track",
+        "on_hold": "On hold",
+        "off_track": "Off track",
+        "at_risk": "At risk",
+    }
+    return mapping.get(str(val), str(val).replace("_", " ").title())
+
 # Sidebar menu only
 with st.sidebar:
     st.header("Menu")
@@ -529,7 +540,7 @@ elif page == "Findings":
                 "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
                 "Responsable del proyecto": _cf_value_from_project_row(p, "Responsable Proyecto"),
                 "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
-                "Estado del proyecto": p.get("status") or "",
+                    "Estado": _fmt_status(p.get("status")),
                 "Dias desde ultimo update": days_since,
                 "Cantidad de tareas": total_tasks if total_tasks is not None else "",
             }
