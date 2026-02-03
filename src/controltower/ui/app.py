@@ -493,7 +493,7 @@ elif page == "Findings":
         if project_gids:
             with engine.begin() as conn:
                 proj_rows = conn.execute(text("""
-                    SELECT gid, name, raw_data, last_status_update_at, total_tasks
+                    SELECT gid, name, raw_data, last_status_update_at, total_tasks, status
                     FROM projects
                     WHERE gid = ANY(:gids)
                 """), {"gids": project_gids}).mappings().all()
@@ -529,6 +529,7 @@ elif page == "Findings":
                     "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
                     "Responsable del proyecto": _cf_value_from_project_row(p, "Responsable Proyecto"),
                     "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+                    "Estado del proyecto": p.get("status") or "",
                     "Dias desde ultimo update": days_since,
                     "Cantidad de tareas": total_tasks if total_tasks is not None else "",
                 }
