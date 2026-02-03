@@ -1,7 +1,10 @@
 from __future__ import annotations
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
+
+load_dotenv()
 
 def build_db_url() -> str:
     host = os.getenv("DB_HOST", "localhost")
