@@ -149,7 +149,7 @@ elif page == "Proyectos":
         where.append("""
             EXISTS (
               SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
-              WHERE cf->>'name' = 'Cliente' AND COALESCE(cf->>'display_value','') ILIKE :client
+              WHERE cf->>'name' = 'cliente_nuevo' AND COALESCE(cf->>'display_value','') ILIKE :client
             )
         """)
         params["client"] = f"%{client_query.strip()}%"
@@ -228,7 +228,7 @@ elif page == "Proyectos":
         cols[2].write(cf.get("Responsable Proyecto") or p.get("owner_name") or "")
         cols[3].write(cf.get("Sponsor") or "")
         cols[4].write(cf.get("Priority") or cf.get("Prioridad") or "")
-        cols[5].write(cf.get("Cliente") or "")
+        cols[5].write(cf.get("cliente_nuevo") or "")
         cols[6].write(_fmt_date(cf.get("Fecha Inicio del proyecto") or cf.get("Fecha Inicio") or ""))
         cols[7].write(_fmt_date(cf.get("Fecha Planificada Termino del proyecto") or cf.get("Fecha Planificada Termino del proyecto") or ""))
         last_update = _humanize_last_update(p.get("last_status_update_at"))
@@ -320,7 +320,7 @@ elif page == "Findings":
         "id": r.get("id"),
         "pmo_id": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "PMO ID"),
         "proyecto": (projects_map.get(r.get("project_gid")) or {}).get("name") or "",
-        "cliente": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Cliente"),
+        "cliente": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "cliente_nuevo"),
         "responsable": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Responsable Proyecto"),
         "regla": r.get("rule_id"),
         "severidad": r.get("severity"),
@@ -369,7 +369,7 @@ elif page == "Findings":
                 export_rows.append({
                     "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
                     "Proyecto": p.get("name") or "",
-                    "Cliente": _cf_value_from_project_row(p, "Cliente") or "",
+                    "Cliente": _cf_value_from_project_row(p, "cliente_nuevo") or "",
                     "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or "",
                     "Regla": r.get("rule_id"),
                     "Severidad": r.get("severity"),
