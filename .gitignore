@@ -19,6 +19,7 @@ Thumbs.db
 
 # Streamlit
 .streamlit/
+!.streamlit/config.toml
 
 # Local DB
 data/

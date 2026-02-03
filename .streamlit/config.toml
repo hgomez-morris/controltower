@@ -1,0 +1,6 @@
+﻿[server]
+port = 8503
+headless = true
+
+[browser]
+serverPort = 8503
