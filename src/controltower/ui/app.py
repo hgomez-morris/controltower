@@ -85,7 +85,7 @@ with st.sidebar:
     pmo_id_query = st.text_input("PMO-ID contiene")
     resp_query = st.text_input("Responsable contiene")
     client_query = st.text_input("Cliente contiene")
-    owner_query = st.text_input("JP / Owner contiene")
+    sponsor_query = st.text_input("Sponsor contiene")
     limit = st.number_input("Limite", min_value=20, max_value=200, value=20, step=20)
     show_raw = st.checkbox("Mostrar raw del proyecto", value=False)
     sort_stale = st.checkbox("Ordenar por ultimo update (mas antiguo primero)", value=False)
@@ -232,9 +232,9 @@ with tab3:
     if project_query.strip():
         where.append("(details->>'project_name') ILIKE :pname")
         params["pname"] = f"%{project_query.strip()}%"
-    if owner_query.strip():
-        where.append("(details->>'owner_name') ILIKE :oname")
-        params["oname"] = f"%{owner_query.strip()}%"
+    if sponsor_query.strip():
+        where.append("(details->>'sponsor') ILIKE :sponsor")
+        params["sponsor"] = f"%{sponsor_query.strip()}%"
 
     q = f"""
         SELECT id, project_gid, rule_id, severity, status, created_at, details
