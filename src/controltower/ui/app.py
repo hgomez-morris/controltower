@@ -624,8 +624,14 @@ elif page == "Findings":
 elif page == "Seguimiento":
     st.subheader("Seguimiento")
     monitoring_cfg = cfg.get("monitoring", {}) if isinstance(cfg, dict) else {}
-    new_days = int(monitoring_cfg.get("new_projects_days", 7))
-    closing_days = int(monitoring_cfg.get("closing_soon_days", 15))
+    new_days_default = int(monitoring_cfg.get("new_projects_days", 7))
+    closing_days_default = int(monitoring_cfg.get("closing_soon_days", 15))
+
+    fcols = st.columns(4)
+    sponsor_query = fcols[0].text_input("Sponsor contiene", value="Abrigo")
+    resp_query = fcols[1].text_input("Responsable contiene")
+    new_days = fcols[2].number_input("Nuevos (días)", min_value=1, max_value=120, value=new_days_default, step=1)
+    closing_days = fcols[3].number_input("Cierre (días)", min_value=1, max_value=120, value=closing_days_default, step=1)
 
     st.markdown(f"**Proyectos nuevos (últimos {new_days} días)**")
     cutoff_dt = datetime.now(timezone.utc) - timedelta(days=new_days)
@@ -638,8 +644,22 @@ elif page == "Seguimiento":
                 SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
                 WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
               )
+              AND (:sponsor = '' OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf2
+                WHERE cf2->>'name' = 'Sponsor' AND COALESCE(cf2->>'display_value','') ILIKE :sponsor_like
+              ))
+              AND (:resp = '' OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf3
+                WHERE cf3->>'name' = 'Responsable Proyecto' AND COALESCE(cf3->>'display_value','') ILIKE :resp_like
+              ))
             ORDER BY (raw_data->'project'->>'created_at')::timestamptz DESC
-        """), {"cutoff": cutoff_dt}).mappings().all()
+        """), {
+            "cutoff": cutoff_dt,
+            "sponsor": sponsor_query.strip(),
+            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "resp": resp_query.strip(),
+            "resp_like": f"%{resp_query.strip()}%",
+        }).mappings().all()
 
     if new_projects:
         df_new = pd.DataFrame([{
@@ -669,8 +689,22 @@ elif page == "Seguimiento":
                 SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
                 WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
               )
+              AND (:sponsor = '' OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf2
+                WHERE cf2->>'name' = 'Sponsor' AND COALESCE(cf2->>'display_value','') ILIKE :sponsor_like
+              ))
+              AND (:resp = '' OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf3
+                WHERE cf3->>'name' = 'Responsable Proyecto' AND COALESCE(cf3->>'display_value','') ILIKE :resp_like
+              ))
             ORDER BY due_date ASC
-        """), {"end_date": end_date}).mappings().all()
+        """), {
+            "end_date": end_date,
+            "sponsor": sponsor_query.strip(),
+            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "resp": resp_query.strip(),
+            "resp_like": f"%{resp_query.strip()}%",
+        }).mappings().all()
 
     if closing_projects:
         df_close = pd.DataFrame([{
