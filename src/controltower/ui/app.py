@@ -5,7 +5,7 @@ import pandas as pd
 import io
 import plotly.express as px
 from openpyxl.utils import get_column_letter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from sqlalchemy import text
 from controltower.db.connection import get_engine
 from controltower.config import load_config
@@ -107,7 +107,7 @@ def _fmt_status(val):
 # Sidebar menu only
 with st.sidebar:
     st.header("Menu")
-    page = st.radio("Ir a", ["Dashboard", "Proyectos", "Findings"], label_visibility="collapsed")
+    page = st.radio("Ir a", ["Dashboard", "Proyectos", "Findings", "Seguimiento"], label_visibility="collapsed")
 
 if page == "Dashboard":
     st.subheader("Dashboard")
@@ -620,3 +620,70 @@ elif page == "Findings":
                 """), {"ids": ids, "c": ack, "by": ack_by or "PMO"})
             st.success("Hallazgos acknowledged.")
             st.rerun()
+
+elif page == "Seguimiento":
+    st.subheader("Seguimiento")
+    monitoring_cfg = cfg.get("monitoring", {}) if isinstance(cfg, dict) else {}
+    new_days = int(monitoring_cfg.get("new_projects_days", 7))
+    closing_days = int(monitoring_cfg.get("closing_soon_days", 15))
+
+    st.markdown(f"**Proyectos nuevos (últimos {new_days} días)**")
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=new_days)
+    with engine.begin() as conn:
+        new_projects = conn.execute(text("""
+            SELECT gid, name, owner_name, due_date, status, raw_data, last_status_update_at
+            FROM projects
+            WHERE (raw_data->'project'->>'created_at')::timestamptz >= :cutoff
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
+                WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+              )
+            ORDER BY (raw_data->'project'->>'created_at')::timestamptz DESC
+        """), {"cutoff": cutoff_dt}).mappings().all()
+
+    if new_projects:
+        df_new = pd.DataFrame([{
+            "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+            "Proyecto": p.get("name") or "",
+            "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
+            "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto"),
+            "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+            "Estado": _fmt_status(p.get("status")),
+            "Fecha creación": _fmt_date((p.get("raw_data") or {}).get("project", {}).get("created_at")),
+        } for p in new_projects])
+        st.dataframe(df_new, use_container_width=True, height=260, hide_index=True)
+        st.caption(f"Total: {len(df_new)}")
+    else:
+        st.info("No hay proyectos nuevos en el periodo.")
+
+    st.markdown(f"**Proyectos por cerrar (atrasados o en los próximos {closing_days} días)**")
+    today = date.today()
+    end_date = today + timedelta(days=closing_days)
+    with engine.begin() as conn:
+        closing_projects = conn.execute(text("""
+            SELECT gid, name, owner_name, due_date, status, raw_data, last_status_update_at
+            FROM projects
+            WHERE due_date IS NOT NULL
+              AND due_date <= :end_date
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
+                WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+              )
+            ORDER BY due_date ASC
+        """), {"end_date": end_date}).mappings().all()
+
+    if closing_projects:
+        df_close = pd.DataFrame([{
+            "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+            "Proyecto": p.get("name") or "",
+            "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
+            "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto"),
+            "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+            "Estado": _fmt_status(p.get("status")),
+            "Fecha término": _fmt_date(p.get("due_date")),
+            "Días a cierre": (p.get("due_date") - today).days if p.get("due_date") else "",
+        } for p in closing_projects])
+        st.dataframe(df_close, use_container_width=True, height=260, hide_index=True)
+        st.caption(f"Total: {len(df_close)}")
+    else:
+        st.info("No hay proyectos con cierre próximo.")

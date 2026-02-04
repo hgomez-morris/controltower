@@ -47,3 +47,7 @@ visibility:
   # MVP: only JP and PMO
   notify_jp: true
   notify_pmo_channel: true
+
+monitoring:
+  new_projects_days: 7
+  closing_soon_days: 15
