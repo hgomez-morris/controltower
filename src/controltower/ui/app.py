@@ -503,11 +503,11 @@ elif page == "Findings":
     projects_map = {}
     if project_gids:
         with engine.begin() as conn:
-            proj_rows = conn.execute(text("""
-                SELECT gid, name, raw_data, last_status_update_at, total_tasks, status
-                FROM projects
-                WHERE gid = ANY(:gids)
-            """), {"gids": project_gids}).mappings().all()
+                proj_rows = conn.execute(text("""
+                    SELECT gid, name, raw_data, last_status_update_at, total_tasks, status, calculated_progress
+                    FROM projects
+                    WHERE gid = ANY(:gids)
+                """), {"gids": project_gids}).mappings().all()
         projects_map = {p["gid"]: p for p in proj_rows}
 
     # Build rule columns from config
@@ -534,16 +534,24 @@ elif page == "Findings":
                 if isinstance(last_update, datetime):
                     days_since = (datetime.now(timezone.utc) - last_update.astimezone(timezone.utc)).days
             total_tasks = p.get("total_tasks")
-            by_project[gid] = {
-                "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
-                "Nombre de proyecto": p.get("name") or "",
-                "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
-                "Responsable del proyecto": _cf_value_from_project_row(p, "Responsable Proyecto"),
-                "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+                progress = p.get("calculated_progress")
+                progress_fmt = ""
+                if progress is not None:
+                    try:
+                        progress_fmt = f"{int(round(float(progress)))} %"
+                    except Exception:
+                        progress_fmt = ""
+                by_project[gid] = {
+                    "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+                    "Nombre de proyecto": p.get("name") or "",
+                    "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
+                    "Responsable del proyecto": _cf_value_from_project_row(p, "Responsable Proyecto"),
+                    "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
                     "Estado": _fmt_status(p.get("status")),
-                "Dias desde ultimo update": days_since,
-                "Cantidad de tareas": total_tasks if total_tasks is not None else "",
-            }
+                    "Dias desde ultimo update": days_since,
+                    "Cantidad de tareas": total_tasks if total_tasks is not None else "",
+                    "Avance": progress_fmt,
+                }
             for rc in rule_cols:
                 by_project[gid][rc] = ""
         rule_id = r.get("rule_id")
@@ -563,9 +571,26 @@ elif page == "Findings":
             "Responsable del proyecto": 70,
             "Sponsor": 70,
         }
-        for idx, col in enumerate(df_export.columns, start=1):
-            col_name = str(col)
-            ws.column_dimensions[get_column_letter(idx)].width = widths.get(col_name, 50)
+            # Reorder columns to place Avance between tareas and rule columns
+            base_cols = [
+                "PMO-ID",
+                "Nombre de proyecto",
+                "Cliente",
+                "Responsable del proyecto",
+                "Sponsor",
+                "Estado",
+                "Dias desde ultimo update",
+                "Cantidad de tareas",
+                "Avance",
+            ]
+            rule_cols_present = [c for c in df_export.columns if c not in base_cols]
+            df_export = df_export[base_cols + rule_cols_present]
+            df_export.to_excel(writer, index=False, sheet_name="findings")
+            ws = writer.sheets["findings"]
+
+            for idx, col in enumerate(df_export.columns, start=1):
+                col_name = str(col)
+                ws.column_dimensions[get_column_letter(idx)].width = widths.get(col_name, 50)
     st.download_button(
         "Exportar a Excel",
         data=buf.getvalue(),
