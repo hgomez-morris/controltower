@@ -97,6 +97,10 @@ def _fmt_status(val):
         "on_hold": "On hold",
         "off_track": "Off track",
         "at_risk": "At risk",
+        "green": "On track",
+        "yellow": "At risk",
+        "red": "Off track",
+        "blue": "On track",
     }
     return mapping.get(str(val), str(val).replace("_", " ").title())
 
@@ -579,15 +583,16 @@ elif page == "Findings":
         df_export.to_excel(writer, index=False, sheet_name="findings")
         ws = writer.sheets["findings"]
         widths = {
-            "PMO-ID": 20,
-            "Nombre de proyecto": 70,
-            "Cliente": 40,
+            "PMO-ID": 15,
+            "Nombre de proyecto": 60,
+            "Cliente": 25,
             "Responsable del proyecto": 25,
             "Sponsor": 25,
+            "Avance": 10,
         }
         for idx, col in enumerate(df_export.columns, start=1):
             col_name = str(col)
-            ws.column_dimensions[get_column_letter(idx)].width = widths.get(col_name, 20)
+            ws.column_dimensions[get_column_letter(idx)].width = widths.get(col_name, 10)
     st.download_button(
         "Exportar a Excel",
         data=buf.getvalue(),
