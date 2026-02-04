@@ -430,7 +430,7 @@ elif page == "Findings":
         "select": False,
         "id": r.get("id"),
         "pmo_id": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "PMO ID"),
-        "proyecto": f"{(projects_map.get(r.get('project_gid')) or {}).get('name') or ''} ({(projects_map.get(r.get('project_gid')) or {}).get('status') or ''})".strip(),
+        "proyecto": f"{(projects_map.get(r.get('project_gid')) or {}).get('name') or ''} ({_fmt_status((projects_map.get(r.get('project_gid')) or {}).get('status'))})".strip(),
         "cliente": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "cliente_nuevo"),
         "responsable": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Responsable Proyecto"),
         "sponsor": _cf_value_from_project_row(projects_map.get(r.get("project_gid")) or {}, "Sponsor"),
@@ -579,15 +579,15 @@ elif page == "Findings":
         df_export.to_excel(writer, index=False, sheet_name="findings")
         ws = writer.sheets["findings"]
         widths = {
-            "PMO-ID": 30,
-            "Nombre de proyecto": 100,
-            "Cliente": 70,
-            "Responsable del proyecto": 70,
-            "Sponsor": 70,
+            "PMO-ID": 20,
+            "Nombre de proyecto": 70,
+            "Cliente": 40,
+            "Responsable del proyecto": 25,
+            "Sponsor": 25,
         }
         for idx, col in enumerate(df_export.columns, start=1):
             col_name = str(col)
-            ws.column_dimensions[get_column_letter(idx)].width = widths.get(col_name, 50)
+            ws.column_dimensions[get_column_letter(idx)].width = widths.get(col_name, 20)
     st.download_button(
         "Exportar a Excel",
         data=buf.getvalue(),
