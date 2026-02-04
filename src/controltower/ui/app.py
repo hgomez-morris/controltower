@@ -729,7 +729,18 @@ elif page == "Seguimiento":
             "Fecha término": _fmt_date(p.get("planned_end_date")),
             "Días a cierre": (p.get("planned_end_date") - today).days if p.get("planned_end_date") else "",
         } for p in closing_projects])
-        st.dataframe(df_close, use_container_width=True, height=260, hide_index=True)
+        def _row_style(row):
+            try:
+                days = int(row["Días a cierre"])
+            except Exception:
+                return [""] * len(row)
+            if days < 0:
+                return ["background-color: #f8d7da"] * len(row)
+            if 0 <= days <= 3:
+                return ["background-color: #fff3cd"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(df_close.style.apply(_row_style, axis=1), use_container_width=True, height=260)
         st.caption(f"Total: {len(df_close)}")
     else:
         st.info("No hay proyectos con cierre próximo.")
