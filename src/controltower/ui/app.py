@@ -681,10 +681,22 @@ elif page == "Seguimiento":
     end_date = today + timedelta(days=closing_days)
     with engine.begin() as conn:
         closing_projects = conn.execute(text("""
-            SELECT gid, name, owner_name, due_date, status, raw_data, last_status_update_at
+            SELECT gid, name, owner_name, status, raw_data, last_status_update_at,
+                   COALESCE(
+                     (cf_end->'date_value'->>'date')::date,
+                     (cf_end->>'display_value')::date
+                   ) AS planned_end_date
             FROM projects
-            WHERE due_date IS NOT NULL
-              AND due_date <= :end_date
+            LEFT JOIN LATERAL jsonb_array_elements(raw_data->'project'->'custom_fields') cf_end
+              ON cf_end->>'name' = 'Fecha Planificada Termino del proyecto'
+            WHERE COALESCE(
+                     (cf_end->'date_value'->>'date')::date,
+                     (cf_end->>'display_value')::date
+                  ) IS NOT NULL
+              AND COALESCE(
+                     (cf_end->'date_value'->>'date')::date,
+                     (cf_end->>'display_value')::date
+                  ) <= :end_date
               AND EXISTS (
                 SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
                 WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
@@ -697,7 +709,7 @@ elif page == "Seguimiento":
                 SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf3
                 WHERE cf3->>'name' = 'Responsable Proyecto' AND COALESCE(cf3->>'display_value','') ILIKE :resp_like
               ))
-            ORDER BY due_date ASC
+            ORDER BY planned_end_date ASC
         """), {
             "end_date": end_date,
             "sponsor": sponsor_query.strip(),
@@ -714,8 +726,8 @@ elif page == "Seguimiento":
             "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto"),
             "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
             "Estado": _fmt_status(p.get("status")),
-            "Fecha término": _fmt_date(p.get("due_date")),
-            "Días a cierre": (p.get("due_date") - today).days if p.get("due_date") else "",
+            "Fecha término": _fmt_date(p.get("planned_end_date")),
+            "Días a cierre": (p.get("planned_end_date") - today).days if p.get("planned_end_date") else "",
         } for p in closing_projects])
         st.dataframe(df_close, use_container_width=True, height=260, hide_index=True)
         st.caption(f"Total: {len(df_close)}")
