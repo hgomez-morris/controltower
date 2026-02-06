@@ -1,0 +1,84 @@
+﻿{
+    "Catalog": "AWS",
+    "PrimaryNeedsFromAws": [
+        "Co-Sell - Deal Support"
+    ],
+    "NationalSecurity": "No",
+    "Customer": {
+        "Account": {
+            "Industry": "Financial Services",
+            "CompanyName": "PICAIO",
+            "WebsiteUrl": "picaio.ai",
+            "AwsAccountId": "344174879645",
+            "Address": {
+                "City": "Ciudad De Mexico",
+                "PostalCode": "5410",
+                "CountryCode": "MX",
+                "StreetAddress": "1a Cda Monte Las Cruces"
+            }
+        },
+        "Contacts": [
+            {
+                "Email": "jose.ruiz@picaio.ai",
+                "FirstName": "Jose",
+                "LastName": "Ruiz",
+                "BusinessTitle": "CTO",
+                "Phone": "+525543566404"
+            }
+        ]
+    },
+    "Project": {
+        "DeliveryModels": [
+            "Other"
+        ],
+        "ExpectedCustomerSpend": [
+            {
+                "Amount": "13720",
+                "CurrencyCode": "USD",
+                "Frequency": "Monthly",
+                "TargetCompany": "AWS"
+            }
+        ],
+        "Title": "Picaio On-Premise #EXTMIG",
+        "ApnPrograms": [
+            "Well-Architected"
+        ],
+        "CustomerBusinessProblem": "On premise migration to AWS",
+        "CustomerUseCase": "Migration / Database Migration"
+    },
+    "OpportunityType": "Net New Business",
+    "Marketing": {
+        "CampaignName": "2025 û WA Automate to Elevate",
+        "Source": "Marketing Activity",
+        "AwsFundingUsed": "No"
+    },
+    "Id": "O7674290",
+    "Arn": "arn:aws:partnercentral:us-east-1:058106090841:catalog/AWS/opportunity/O7674290",
+    "LastModifiedDate": "2025-12-31T11:45:03.119000+00:00",
+    "CreatedDate": "2025-06-17T14:10:49+00:00",
+    "RelatedEntityIdentifiers": {
+        "AwsMarketplaceOffers": [],
+        "AwsMarketplaceOfferSets": [],
+        "Solutions": [
+            "S-0019210"
+        ],
+        "AwsProducts": [
+            "AmazonEC2Linux"
+        ]
+    },
+    "LifeCycle": {
+        "Stage": "Launched",
+        "NextSteps": "12/31/2025 Fecha de lanzamiento {100}",
+        "TargetCloseDate": "2025-12-31",
+        "ReviewStatus": "Approved"
+    },
+    "OpportunityTeam": [
+        {
+            "Email": "jtobar@morrisopazo.com",
+            "FirstName": "Joaquin",
+            "LastName": "Tobar",
+            "BusinessTitle": "OpportunityOwner",
+            "Phone": "+56974503329"
+        }
+    ]
+}

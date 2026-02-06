@@ -20,10 +20,11 @@ rules:
     days_threshold: 7
     base_severity: medium
 
-  no_activity:
+  no_tasks_activity_last_7_days:
     enabled: true
     days_threshold: 7
     base_severity: medium
+
 
   schedule_risk:
     enabled: true

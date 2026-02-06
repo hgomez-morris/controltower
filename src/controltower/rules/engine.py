@@ -20,6 +20,13 @@ def evaluate_rules(config: dict, sync_id: str) -> int:
     created = 0
 
     with engine.begin() as conn:
+        # migrate legacy rule id if present
+        conn.execute(text("""
+            UPDATE findings
+            SET rule_id='no_tasks_activity_last_7_days'
+            WHERE rule_id='no_activity'
+        """))
+
         projects = conn.execute(text("""
             SELECT gid, name, owner_name, due_date, calculated_progress, last_status_update_at,
                    raw_data, last_activity_at, tasks_created_last_7d, tasks_completed_last_7d,
@@ -28,8 +35,10 @@ def evaluate_rules(config: dict, sync_id: str) -> int:
         """)).mappings().all()
 
         for p in projects:
+            if not _project_in_scope(p):
+                continue
             created += _rule_no_status_update(conn, config, p)
-            created += _rule_no_activity(conn, config, p)
+            created += _rule_no_tasks_activity_last_7_days(conn, config, p)
             created += _rule_schedule_risk(conn, config, p)
             created += _rule_amount_of_tasks(conn, config, p)
 
@@ -38,6 +47,41 @@ def evaluate_rules(config: dict, sync_id: str) -> int:
 
     log.info("Rules evaluated. findings_created=%s", created)
     return created
+
+def _project_in_scope(p) -> bool:
+    raw = (p.get("raw_data") or {}).get("project") if hasattr(p, "get") else None
+    if not raw:
+        return False
+    fields = raw.get("custom_fields") or []
+    pmo_ok = False
+    bv_ok = False
+    phase_ok = True
+    completed_ok = True
+    try:
+        if str(raw.get("completed") or "").lower() == "true":
+            completed_ok = False
+    except Exception:
+        pass
+    for f in fields:
+        name = f.get("name") or ""
+        gid = f.get("gid") or ""
+        if name == "PMO ID":
+            if (f.get("display_value") or "").strip():
+                pmo_ok = True
+        if gid == "1209701308000267" or name == "Business Vertical":
+            enum_val = f.get("enum_value") or {}
+            if (
+                (enum_val.get("gid") == "1209701308000273")
+                or (enum_val.get("name") == "Professional Services")
+                or ((f.get("display_value") or "") == "Professional Services")
+            ):
+                bv_ok = True
+        if gid == "1207505889399747" or name == "Fase del proyecto":
+            enum_val = f.get("enum_value") or {}
+            phase_val = (f.get("display_value") or enum_val.get("name") or "").strip().lower()
+            if ("terminad" in phase_val) or ("cancelad" in phase_val):
+                phase_ok = False
+    return pmo_ok and bv_ok and phase_ok and completed_ok
 
 def _get_open_finding(conn, project_gid: str, rule_id: str) -> dict | None:
     r = conn.execute(text("""
@@ -87,8 +131,8 @@ def _rule_no_status_update(conn, config: dict, p) -> int:
         })
     return 0
 
-def _rule_no_activity(conn, config: dict, p) -> int:
-    rule = config["rules"]["no_activity"]
+def _rule_no_tasks_activity_last_7_days(conn, config: dict, p) -> int:
+    rule = config["rules"]["no_tasks_activity_last_7_days"]
     if not rule.get("enabled", True):
         return 0
 
@@ -97,13 +141,14 @@ def _rule_no_activity(conn, config: dict, p) -> int:
     created_7d = int(p["tasks_created_last_7d"] or 0)
     completed_7d = int(p["tasks_completed_last_7d"] or 0)
     if created_7d == 0 and completed_7d == 0:
-        return _create_or_update_finding(conn, p["gid"], "no_activity", rule["base_severity"], {
+        return _create_or_update_finding(conn, p["gid"], "no_tasks_activity_last_7_days", rule["base_severity"], {
             "project_name": p["name"],
             "owner_name": p["owner_name"],
             "tasks_created_last_7d": created_7d,
             "tasks_completed_last_7d": completed_7d,
         })
     return 0
+
 
 def _rule_schedule_risk(conn, config: dict, p) -> int:
     rule = config["rules"]["schedule_risk"]

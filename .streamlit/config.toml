@@ -1,4 +1,4 @@
-﻿[server]
+[server]
 port = 8503
 headless = true
 

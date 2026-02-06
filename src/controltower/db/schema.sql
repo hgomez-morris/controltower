@@ -46,6 +46,36 @@ CREATE TABLE IF NOT EXISTS findings (
     FOREIGN KEY (project_gid) REFERENCES projects(gid)
 );
 
+CREATE TABLE IF NOT EXISTS status_updates (
+    gid VARCHAR(50) PRIMARY KEY,
+    project_gid VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP,
+    author_gid VARCHAR(50),
+    author_name VARCHAR(200),
+    status_type VARCHAR(50),
+    title TEXT,
+    text TEXT,
+    html_text TEXT,
+    raw_data JSONB,
+    synced_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (project_gid) REFERENCES projects(gid)
+);
+
+CREATE TABLE IF NOT EXISTS status_update_comments (
+    id SERIAL PRIMARY KEY,
+    status_update_gid VARCHAR(50) NOT NULL,
+    story_gid VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP,
+    author_gid VARCHAR(50),
+    author_name VARCHAR(200),
+    text TEXT,
+    html_text TEXT,
+    raw_data JSONB,
+    synced_at TIMESTAMP NOT NULL,
+    UNIQUE (story_gid),
+    FOREIGN KEY (status_update_gid) REFERENCES status_updates(gid)
+);
+
 CREATE TABLE IF NOT EXISTS sync_log (
     id SERIAL PRIMARY KEY,
     sync_id VARCHAR(50) UNIQUE NOT NULL,

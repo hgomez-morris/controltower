@@ -25,6 +25,27 @@ CRITICAL_FIELDS = [
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
+def _phase_is_terminated_or_cancelled(project: dict) -> bool:
+    fields = project.get("custom_fields") or []
+    for f in fields:
+        if (f.get("gid") == "1207505889399747") or (f.get("name") == "Fase del proyecto"):
+            val = f.get("display_value") or (f.get("enum_value") or {}).get("name") or ""
+            val = str(val).strip().lower()
+            if ("terminad" in val) or ("cancelad" in val):
+                return True
+    return False
+
+def _recently_closed_or_cancelled(project: dict, cutoff: datetime) -> bool:
+    # Use completed_at or modified_at as proxy for closure timing
+    ts = project.get("completed_at") or project.get("modified_at") or project.get("created_at")
+    if not ts:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return False
+    return dt >= cutoff
+
 def compute_task_metrics(tasks: list[dict], lookback_days: int) -> dict:
     total = len(tasks)
     completed = sum(1 for t in tasks if t.get("completed") is True)
@@ -121,6 +142,74 @@ def upsert_project(conn, project: dict) -> None:
     """)
     conn.execute(q, project)
 
+def upsert_status_update(conn, project_gid: str, su: dict) -> None:
+    author = su.get("author") or {}
+    row = {
+        "gid": su.get("gid"),
+        "project_gid": project_gid,
+        "created_at": su.get("created_at"),
+        "author_gid": author.get("gid"),
+        "author_name": author.get("name"),
+        "status_type": su.get("status_type"),
+        "title": su.get("title"),
+        "text": su.get("text"),
+        "html_text": su.get("html_text"),
+        "raw_data": json.dumps(su),
+        "synced_at": _utcnow().isoformat(),
+    }
+    conn.execute(text("""
+        INSERT INTO status_updates (
+            gid, project_gid, created_at, author_gid, author_name, status_type,
+            title, text, html_text, raw_data, synced_at
+        ) VALUES (
+            :gid, :project_gid, :created_at, :author_gid, :author_name, :status_type,
+            :title, :text, :html_text, CAST(:raw_data AS jsonb), :synced_at
+        )
+        ON CONFLICT (gid) DO UPDATE SET
+            project_gid = EXCLUDED.project_gid,
+            created_at = EXCLUDED.created_at,
+            author_gid = EXCLUDED.author_gid,
+            author_name = EXCLUDED.author_name,
+            status_type = EXCLUDED.status_type,
+            title = EXCLUDED.title,
+            text = EXCLUDED.text,
+            html_text = EXCLUDED.html_text,
+            raw_data = EXCLUDED.raw_data,
+            synced_at = EXCLUDED.synced_at
+    """), row)
+
+def insert_status_update_comment(conn, status_update_gid: str, story: dict) -> None:
+    author = story.get("created_by") or story.get("author") or {}
+    row = {
+        "status_update_gid": status_update_gid,
+        "story_gid": story.get("gid"),
+        "created_at": story.get("created_at"),
+        "author_gid": author.get("gid"),
+        "author_name": author.get("name"),
+        "text": story.get("text"),
+        "html_text": story.get("html_text"),
+        "raw_data": json.dumps(story),
+        "synced_at": _utcnow().isoformat(),
+    }
+    conn.execute(text("""
+        INSERT INTO status_update_comments (
+            status_update_gid, story_gid, created_at, author_gid, author_name,
+            text, html_text, raw_data, synced_at
+        ) VALUES (
+            :status_update_gid, :story_gid, :created_at, :author_gid, :author_name,
+            :text, :html_text, CAST(:raw_data AS jsonb), :synced_at
+        )
+        ON CONFLICT (story_gid) DO UPDATE SET
+            status_update_gid = EXCLUDED.status_update_gid,
+            created_at = EXCLUDED.created_at,
+            author_gid = EXCLUDED.author_gid,
+            author_name = EXCLUDED.author_name,
+            text = EXCLUDED.text,
+            html_text = EXCLUDED.html_text,
+            raw_data = EXCLUDED.raw_data,
+            synced_at = EXCLUDED.synced_at
+    """), row)
+
 def main_sync(config: dict) -> str:
     log = logging.getLogger("sync")
     sync_id = str(uuid.uuid4())
@@ -130,12 +219,16 @@ def main_sync(config: dict) -> str:
     token = os.getenv("ASANA_ACCESS_TOKEN","")
     workspace_gid = config["asana"]["workspace_gid"]
     client = AsanaReadOnlyClient(token)
-    lookback_days = int(config["rules"]["no_activity"].get("days_threshold", 7))
+    lookback_cfg = (config.get("rules") or {}).get("no_tasks_activity_last_7_days")
+    if not lookback_cfg:
+        lookback_cfg = (config.get("rules") or {}).get("no_activity", {})
+    lookback_days = int((lookback_cfg or {}).get("days_threshold", 7))
 
     with engine.begin() as conn:
         conn.execute(text("""INSERT INTO sync_log(sync_id, started_at, status) VALUES(:sync_id,:started,'running')"""),
                      {"sync_id": sync_id, "started": started.isoformat()})
 
+        cutoff = _utcnow() - timedelta(days=30)
         projects = client.list_projects(workspace_gid)
         changes_detected = 0
         total = len(projects)
@@ -148,8 +241,11 @@ def main_sync(config: dict) -> str:
                 log.info("Sync progress: %s/%s projects | elapsed=%ss eta=%ss", i, total, int(elapsed), eta)
             pgid = p["gid"]
             pfull = client.get_project(pgid)
-            if pfull.get("completed") is True:
-                continue
+            is_completed = pfull.get("completed") is True
+            is_terminated_or_cancelled = _phase_is_terminated_or_cancelled(pfull)
+            if is_completed or is_terminated_or_cancelled:
+                if not _recently_closed_or_cancelled(pfull, cutoff):
+                    continue
 
             tasks = client.get_project_tasks(pgid)
             metrics = compute_task_metrics(tasks, lookback_days=lookback_days)
@@ -203,6 +299,24 @@ def main_sync(config: dict) -> str:
                 changes_detected += len(changes)
 
             upsert_project(conn, row)
+
+            # Status updates and comments
+            try:
+                updates = client.list_status_updates(pgid)
+                for su in updates:
+                    if not su.get("gid"):
+                        continue
+                    upsert_status_update(conn, pgid, su)
+                    try:
+                        stories = client.list_status_update_comments(su["gid"])
+                        for st in stories:
+                            if not st.get("gid"):
+                                continue
+                            insert_status_update_comment(conn, su["gid"], st)
+                    except Exception as e:
+                        log.warning("Failed to fetch status update comments. project=%s status_update=%s err=%s", pgid, su.get("gid"), e)
+            except Exception as e:
+                log.warning("Failed to fetch status updates. project=%s err=%s", pgid, e)
 
         conn.execute(text("""
             UPDATE sync_log

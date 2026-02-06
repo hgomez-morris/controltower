@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any, Dict, List
+import logging
 import asana
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -12,13 +13,37 @@ class AsanaReadOnlyClient:
         self.api_client = asana.ApiClient(configuration)
         self.projects_api = asana.ProjectsApi(self.api_client)
         self.tasks_api = asana.TasksApi(self.api_client)
+        self.status_updates_api = asana.StatusUpdatesApi(self.api_client)
+
+    def _consume_iterator(self, iterator: Any) -> List[Dict[str, Any]]:
+        """
+        Safely consume an iterator from Asana SDK.
+        Handles:
+        1. PageIterator with .items() (returns list of dicts)
+        2. Generator/Iterator yielding pages (list of dicts) -> needs flattening
+        3. Generator/Iterator yielding items (dicts) -> return as is
+        """
+        if hasattr(iterator, "items"):
+            return list(iterator.items())
+
+        # It's a generator or generic iterator
+        results = list(iterator)
+        if not results:
+            return []
+
+        # Check if it yielded pages (lists) or items (dicts)
+        if isinstance(results[0], list):
+            # Flatten pages
+            return [item for page in results for item in page]
+        
+        return results
 
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=30))
     def list_projects(self, workspace_gid: str) -> List[Dict[str, Any]]:
         # Only GET operations
         opts = {"archived": False, "limit": 100}
         projects = self.projects_api.get_projects_for_workspace(workspace_gid, opts=opts)
-        return list(projects)
+        return self._consume_iterator(projects)
 
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=30))
     def get_project(self, project_gid: str) -> Dict[str, Any]:
@@ -45,4 +70,63 @@ class AsanaReadOnlyClient:
         # Minimal fields for metrics (counts and activity)
         opts = {"opt_fields": "completed,created_at,completed_at,modified_at", "limit": 100}
         tasks = self.tasks_api.get_tasks_for_project(project_gid, opts=opts)
-        return list(tasks)
+        return self._consume_iterator(tasks)
+
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=30))
+    def list_status_updates(self, project_gid: str) -> List[Dict[str, Any]]:
+        opts = {"limit": 100, "opt_fields": ",".join([
+            "gid",
+            "created_at",
+            "modified_at",
+            "text",
+            "html_text",
+            "title",
+            "status_type",
+            "author.gid",
+            "author.name",
+        ])}
+        updates = self.status_updates_api.get_statuses_for_object(project_gid, opts=opts)
+        return self._consume_iterator(updates)
+
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=30))
+    def list_status_update_comments(self, status_update_gid: str) -> List[Dict[str, Any]]:
+        # Use generic /stories endpoint with parent parameter
+        try:
+            query_params = {
+                "parent": status_update_gid,
+                "opt_fields": ",".join([
+                    "gid",
+                    "created_at",
+                    "text",
+                    "html_text",
+                    "created_by.gid",
+                    "created_by.name",
+                    "type",
+                    "resource_subtype",
+                ])
+            }
+            resp = self.api_client.call_api(
+                "/stories",
+                "GET",
+                query_params=query_params,
+                response_type=object,
+                auth_settings=["personalAccessToken"],
+                _return_http_data_only=True,
+            )
+            if isinstance(resp, dict):
+                data = resp.get("data")
+            elif isinstance(resp, list):
+                data = resp
+            else:
+                data = getattr(resp, "data", None)
+            
+            # Filter for comments if needed, or return all stories. 
+            # Usually users only want 'comment' stories.
+            all_stories = list(data or [])
+            return [s for s in all_stories if s.get("type") == "comment"]
+        except Exception as e:
+            logging.getLogger("asana").warning(
+                "Failed to parse status update comments response. status_update=%s err=%s",
+                status_update_gid, e
+            )
+            return []
