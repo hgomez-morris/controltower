@@ -1,4 +1,4 @@
-# agents.md — Guía operativa PMO Control Tower (MVP+)
+﻿# agents.md — Guía operativa PMO Control Tower (MVP+)
 
 Este repositorio está diseñado para ser ejecutado por un agente/IA asistido por humanos.
 El objetivo es **implementar el MVP** del PMO Control Tower con:
@@ -124,3 +124,15 @@ Variables en `.env`:
 ## 11) Ruta local sugerida (Windows)
 Durante el desarrollo local, clonar en:
 `C:\MorrisFiles\Proyectos\ControlTower`
+
+## 12) Estado del proyecto (pausa)
+**Fecha de pausa:** 9 de febrero de 2026.
+
+Mientras el proyecto esté en pausa:
+- No ejecutar cron ni sync automático.
+- No desplegar cambios a producción.
+
+Para retomar:
+- Verificar `.env` y credenciales vigentes.
+- Levantar servicios locales (`docker-compose`, Streamlit) y ejecutar un sync manual.
+- Revisar pendientes en `docs\PLAN_MEJORAS.md` y `docs\Mejoras_consolidadas_chatgpt.md`.
