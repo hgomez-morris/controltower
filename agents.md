@@ -1,11 +1,11 @@
-# agents.md — Guía operativa para implementar PMO Control Tower (MVP)
+# agents.md — Guía operativa PMO Control Tower (MVP+)
 
 Este repositorio está diseñado para ser ejecutado por un agente/IA asistido por humanos.
 El objetivo es **implementar el MVP** del PMO Control Tower con:
-- Sync read-only desde Asana cada 2 horas (o manual durante desarrollo)
-- Cálculo de 3 reglas (no_status_update, no_activity, schedule_risk)
+- Sync read-only desde Asana (manual o programado)
+- Cálculo de reglas y hallazgos
 - Persistencia en PostgreSQL
-- Alertas vía Slack Incoming Webhook
+- Mensajería vía Slack (webhook + bot para DM)
 - UI Streamlit para visualización y filtros
 
 ## 0) Principio de seguridad (NO NEGOCIABLE)
@@ -24,29 +24,29 @@ Antes de mergear cambios:
 
 ## 1) Definición del MVP (2 semanas)
 Entregables MVP:
-1) Data Collector: sincroniza proyectos + tareas + status updates
-2) Diff / changelog **acotado a campos críticos** (no audit-all en MVP)
+1) Data Collector: sincroniza proyectos + tareas + status updates + comentarios
+2) Diff / changelog acotado a campos críticos
 3) Rules Engine: genera findings
-4) Slack Notifier: envía alertas sólo para *nuevos* findings (evitar spam)
-5) Streamlit UI: dashboard + lista de proyectos + lista de hallazgos + detalle
+4) Slack: mensajes manuales (consolidado por responsable)
+5) Streamlit UI: dashboard + proyectos + findings + seguimiento + mensajes
 
 ## 2) Campos críticos para changelog (MVP)
-El changelog MVP debe auditar solo:
+El changelog MVP audita:
 - due_date
 - owner (gid + name)
-- status (on_track / at_risk / off_track si existe)
+- status (on_track / at_risk / off_track / on_hold)
 - last_status_update_at + last_status_update_by
 - total_tasks, completed_tasks, calculated_progress
 - last_activity_at (derivado)
 
-Todo lo demás (raw dump JSON) puede guardarse en `projects.raw_data` sin diff detallado.
+Todo lo demás puede guardarse en `projects.raw_data` sin diff detallado.
 
-## 3) Reglas MVP (determinísticas)
+## 3) Reglas (MVP)
 ### Regla: no_status_update
 - Condición: `days_since_last_status_update > 7`
 - Severidad base: medium
 
-### Regla: no_activity
+### Regla: no_tasks_activity_last_7_days
 - Condición: `tasks_created_last_7d == 0 AND tasks_completed_last_7d == 0`
 - Severidad base: medium
 
@@ -56,33 +56,37 @@ Comparar `days_remaining` vs `calculated_progress`:
 - days_remaining <= 14 AND progress < 60 => medium
 - days_remaining <= 30 AND progress < 40 => low
 
-## 4) Visibilidad / “Escalamiento” (MVP)
-En MVP la visibilidad debe ser **solo JP → PMO**.
-- El sistema notifica:
-  - JP (DM o mención según configuración)
-  - Canal PMO (p. ej. #pmo-status)
-- No existe CTO/CEO en MVP.
+### Regla: amount_of_tasks
+- Condición: `total_tasks <= 3`
+- Severidad base: medium
+
+## 4) Alcance de datos
+- Solo proyectos con **PMO ID**.
+- Solo proyectos con **Business Vertical = Professional Services**.
+- Proyectos **completados/terminados/cancelados**:
+  - Se sincronizan **solo si** su cierre fue en los últimos 30 días.
+  - **Se excluyen** de todas las grillas y gráficos.
+
+## 5) Visibilidad / Escalamiento (MVP)
+En MVP la visibilidad es **solo JP → PMO**.
+- El sistema genera mensajes por responsable (manual).
 - No hay auto-escalamiento por días en MVP.
 
-## 5) Acciones permitidas (MVP)
-- Slack: enviar alerta de nuevo hallazgo
-- DB: guardar hallazgos + historial
-- UI: permitir **Acknowledge** con comentario obligatorio (no “resolver/borrar”)
+## 6) Mensajería Slack
+- Webhook para canal (mensajes manuales).
+- Bot token (`SLACK_BOT_TOKEN`) para DM directo por email.
+- Mensaje consolidado por responsable:
+  - Un solo mensaje con PMO-ID, nombre y motivo.
+  - Excluye `schedule_risk`.
 
-### Acknowledge (UI)
-Cuando un usuario PMO marca un finding como Acknowledged:
-- Debe dejar comentario obligatorio
-- Debe registrar `acknowledged_at`, `acknowledged_by`, `ack_comment`
-- El finding NO se elimina. Permanece auditable.
+## 7) Status updates y comentarios
+Se almacenan en tablas:
+- `status_updates`
+- `status_update_comments`
 
-## 6) Reglas de notificación (anti-spam)
-- Alertar solo cuando:
-  - se crea un finding nuevo, o
-  - cambia severidad (ej. medium -> high)
-- No reenviar cada sync el mismo finding.
-- (Opcional) Un resumen diario puede agregarse en v2+.
+Se muestran en la UI (modal en Proyectos + grillas de Seguimiento).
 
-## 7) Configuración (config.yaml)
+## 8) Configuración
 Toda regla/umbral/canales se define en YAML.
 No hardcodear:
 - umbrales de días
@@ -90,30 +94,32 @@ No hardcodear:
 - canal Slack / mención JP
 - workspace_gid
 
-## 8) Entornos
+Variables en `.env`:
+- `ASANA_ACCESS_TOKEN`
+- `ASANA_WORKSPACE_GID`
+- `SLACK_WEBHOOK_URL`
+- `SLACK_CHANNEL`
+- `SLACK_BOT_TOKEN`
+- `DB_*`
+
+## 9) Entornos
 ### Desarrollo local
 - PostgreSQL local vía docker-compose
 - Streamlit local
-- Sync manual (comando) y luego cron simulado
+- Sync manual y cron simulado
 
 ### Producción MVP
-- Puede correr en una EC2 pequeña o servidor interno
+- Puede correr en EC2/servidor interno
 - Cron del sistema ejecuta sync cada 2h
 - Streamlit sirve UI interna
 
-## 9) Definition of Done (MVP)
+## 10) Definition of Done (MVP)
 - [ ] Sync funciona para 100–150 proyectos activos sin fallar
-- [ ] Se registran projects + métricas de tareas
-- [ ] Se generan findings consistentes para 3 reglas
-- [ ] Slack recibe alertas (solo nuevos)
+- [ ] Se registran proyectos + métricas + updates + comentarios
+- [ ] Se generan findings consistentes para reglas definidas
+- [ ] Mensajes consolidados listos para envío (manual/Slack)
 - [ ] Streamlit permite filtrar por regla/severidad/JP/proyecto
 - [ ] Acknowledge guarda comentario y auditoría
-
-## 10) Estándar de ingeniería
-- Logs estructurados (nivel INFO por defecto, DEBUG opcional)
-- Manejo de rate limits de Asana (retry con backoff)
-- No exponer secretos en logs
-- Tests unitarios básicos para reglas y cálculo de métricas
 
 ## 11) Ruta local sugerida (Windows)
 Durante el desarrollo local, clonar en:
