@@ -18,6 +18,7 @@ CRITICAL_FIELDS = [
     "completed_tasks",
     "tasks_created_last_7d",
     "tasks_completed_last_7d",
+    "tasks_modified_last_7d",
     "calculated_progress",
     "last_activity_at",
 ]
@@ -64,6 +65,12 @@ def compute_task_metrics(tasks: list[dict], lookback_days: int) -> dict:
         if t.get("completed_at")
         and datetime.fromisoformat(t["completed_at"].replace("Z", "+00:00")) >= lookback
     )
+    modified_last = sum(
+        1
+        for t in tasks
+        if t.get("modified_at")
+        and datetime.fromisoformat(t["modified_at"].replace("Z", "+00:00")) >= lookback
+    )
 
     times = []
     for t in tasks:
@@ -79,6 +86,7 @@ def compute_task_metrics(tasks: list[dict], lookback_days: int) -> dict:
         "calculated_progress": round(progress, 2),
         "tasks_created_last_7d": created_last,
         "tasks_completed_last_7d": completed_last,
+        "tasks_modified_last_7d": modified_last,
         "last_activity_at": last_activity_at.isoformat() if last_activity_at else None,
     }
 
@@ -115,12 +123,12 @@ def upsert_project(conn, project: dict) -> None:
     INSERT INTO projects (
         gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
         last_status_update_at, last_status_update_by, last_activity_at,
-        total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d,
+        total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d,
         raw_data, synced_at
     ) VALUES (
         :gid, :name, :owner_gid, :owner_name, :due_date, :status, :calculated_progress,
         :last_status_update_at, :last_status_update_by, :last_activity_at,
-        :total_tasks, :completed_tasks, :tasks_created_last_7d, :tasks_completed_last_7d,
+        :total_tasks, :completed_tasks, :tasks_created_last_7d, :tasks_completed_last_7d, :tasks_modified_last_7d,
         CAST(:raw_data AS jsonb), :synced_at
     )
     ON CONFLICT (gid) DO UPDATE SET
@@ -137,6 +145,7 @@ def upsert_project(conn, project: dict) -> None:
         completed_tasks = EXCLUDED.completed_tasks,
         tasks_created_last_7d = EXCLUDED.tasks_created_last_7d,
         tasks_completed_last_7d = EXCLUDED.tasks_completed_last_7d,
+        tasks_modified_last_7d = EXCLUDED.tasks_modified_last_7d,
         raw_data = EXCLUDED.raw_data,
         synced_at = EXCLUDED.synced_at
     """)
@@ -267,13 +276,14 @@ def main_sync(config: dict) -> str:
                 "completed_tasks": metrics["completed_tasks"],
                 "tasks_created_last_7d": metrics["tasks_created_last_7d"],
                 "tasks_completed_last_7d": metrics["tasks_completed_last_7d"],
+                "tasks_modified_last_7d": metrics["tasks_modified_last_7d"],
                 "raw_data": json.dumps({"project": pfull}),
                 "synced_at": _utcnow().isoformat(),
             }
             existing = conn.execute(text("""
                 SELECT gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
                        last_status_update_at, last_status_update_by, last_activity_at,
-                       total_tasks, completed_tasks
+                       total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d
                 FROM projects WHERE gid=:gid
             """), {"gid": pgid}).mappings().first()
 

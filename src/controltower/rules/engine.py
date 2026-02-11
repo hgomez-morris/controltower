@@ -114,6 +114,17 @@ def _create_or_update_finding(conn, project_gid: str, rule_id: str, severity: st
 
     return 0
 
+def _resolve_open_finding(conn, project_gid: str, rule_id: str) -> int:
+    r = conn.execute(text("""
+        UPDATE findings
+        SET status='resolved', resolved_at=NOW()
+        WHERE project_gid=:g AND rule_id=:r AND status='open'
+    """), {"g": project_gid, "r": rule_id})
+    try:
+        return int(r.rowcount or 0)
+    except Exception:
+        return 0
+
 def _rule_no_status_update(conn, config: dict, p) -> int:
     rule = config["rules"]["no_status_update"]
     if not rule.get("enabled", True):
@@ -129,13 +140,20 @@ def _rule_no_status_update(conn, config: dict, p) -> int:
             "owner_name": p["owner_name"],
             "days_since_last_status_update": days,
         })
+    _resolve_open_finding(conn, p["gid"], "no_status_update")
     return 0
 
 def _rule_no_tasks_activity_last_7_days(conn, config: dict, p) -> int:
     rule = config["rules"]["no_tasks_activity_last_7_days"]
     if not rule.get("enabled", True):
         return 0
-
+    days_threshold = int(rule.get("days_threshold", 7))
+    last_activity = _parse_iso(p.get("last_activity_at"))
+    if last_activity:
+        days_since = (_utcnow() - last_activity).days
+        if days_since <= days_threshold:
+            _resolve_open_finding(conn, p["gid"], "no_tasks_activity_last_7_days")
+            return 0
     if p["tasks_created_last_7d"] is None or p["tasks_completed_last_7d"] is None:
         return 0
     created_7d = int(p["tasks_created_last_7d"] or 0)
@@ -146,7 +164,10 @@ def _rule_no_tasks_activity_last_7_days(conn, config: dict, p) -> int:
             "owner_name": p["owner_name"],
             "tasks_created_last_7d": created_7d,
             "tasks_completed_last_7d": completed_7d,
+            "last_activity_at": last_activity.isoformat() if last_activity else None,
+            "days_since_last_activity": (_utcnow() - last_activity).days if last_activity else None,
         })
+    _resolve_open_finding(conn, p["gid"], "no_tasks_activity_last_7_days")
     return 0
 
 
@@ -156,6 +177,7 @@ def _rule_schedule_risk(conn, config: dict, p) -> int:
         return 0
     due = p["due_date"]
     if not due:
+        _resolve_open_finding(conn, p["gid"], "schedule_risk")
         return 0  # cannot evaluate without due date
     if isinstance(due, str):
         due_date = date.fromisoformat(due)
@@ -176,6 +198,7 @@ def _rule_schedule_risk(conn, config: dict, p) -> int:
                 "progress": progress,
                 "min_progress_required": float(t["min_progress"]),
             })
+    _resolve_open_finding(conn, p["gid"], "schedule_risk")
     return 0
 
 def _rule_amount_of_tasks(conn, config: dict, p) -> int:
@@ -184,6 +207,7 @@ def _rule_amount_of_tasks(conn, config: dict, p) -> int:
         return 0
     total = p["total_tasks"]
     if total is None:
+        _resolve_open_finding(conn, p["gid"], "amount_of_tasks")
         return 0
     max_tasks = int(rule.get("max_tasks", 3))
     if int(total) <= max_tasks:
@@ -193,4 +217,5 @@ def _rule_amount_of_tasks(conn, config: dict, p) -> int:
             "total_tasks": int(total),
             "max_tasks": max_tasks,
         })
+    _resolve_open_finding(conn, p["gid"], "amount_of_tasks")
     return 0

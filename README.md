@@ -34,6 +34,16 @@ python scripts/init_db.py
 python scripts/run_sync.py
 ```
 
+6b) (Opcional) Sync paralelo:
+```bash
+python scripts/run_sync_parallel.py
+```
+
+6c) (Opcional) Cargar históricos (una sola vez):
+```bash
+python scripts/load_projects_history.py
+```
+
 7) Abrir UI:
 ```bash
 streamlit run src/controltower/ui/app.py
@@ -44,6 +54,8 @@ streamlit run src/controltower/ui/app.py
 - 3 reglas PMO (no_status_update, no_activity, schedule_risk)
 - Alertas Slack (solo nuevos hallazgos)
 - UI Streamlit
+- KPI (tabs KPI1/KPI2/KPI3) con snapshots en DB
+- Búsqueda local (prioriza tabla sincronizada y cae a históricos)
 
 ## No-alcance MVP
 - Modificar Asana (crear/editar tareas/proyectos) — Prohibido

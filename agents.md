@@ -108,10 +108,35 @@ Variables en `.env`:
 - Streamlit local
 - Sync manual y cron simulado
 
+### Sync manual (Windows / Git Bash)
+1) Cargar variables de entorno desde `.env` (incluye workaround para BOM):
+   - `set -a; . <(sed -e '1s/^\xEF\xBB\xBF//' .env); set +a`
+2) Definir `PYTHONPATH`:
+   - `export PYTHONPATH="$(pwd)/src"`
+3) Ejecutar sync:
+   - `python scripts/run_sync.py`
+
+### Sync paralelo (opcional)
+- Script: `python scripts/run_sync_parallel.py`
+- Workers (por defecto 4): `SYNC_WORKERS=8` para ajustar concurrencia.
+
+### Carga histórica (una sola vez)
+Inserta solo proyectos que NO están en `projects`.
+- Ejecutar: `python scripts/load_projects_history.py`
+- Si hay proyectos sin acceso (403), quedan en `logs/forbidden_projects.log`.
+
+### Sync programado (Windows Task Scheduler, cada 4 horas)
+Usar un `.bat` que cargue `.env`, setee `PYTHONPATH` y ejecute `scripts/run_sync.py`.
+Luego, crear una tarea con el trigger “Daily” y “Repeat task every: 4 hours”.
+
 ### Producción MVP
 - Puede correr en EC2/servidor interno
 - Cron del sistema ejecuta sync cada 2h
 - Streamlit sirve UI interna
+
+### Búsqueda local
+La página “Búsqueda” consulta primero `projects` (sync) y luego `projects_history`.
+Si un `gid` existe en ambas, se muestra la versión de `projects`.
 
 ## 10) Definition of Done (MVP)
 - [ ] Sync funciona para 100–150 proyectos activos sin fallar

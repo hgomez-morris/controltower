@@ -130,3 +130,54 @@ class AsanaReadOnlyClient:
                 status_update_gid, e
             )
             return []
+
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=30))
+    def search_tasks(
+        self,
+        workspace_gid: str,
+        text_query: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search tasks in a workspace using /tasks/search.
+        Note: returns tasks, not projects. Use memberships.project to map back.
+        """
+        results: List[Dict[str, Any]] = []
+        params = {
+            "text": text_query,
+            "limit": limit,
+            "opt_fields": ",".join([
+                "gid",
+                "name",
+                "memberships.project.gid",
+                "memberships.project.name",
+            ]),
+        }
+        next_page = None
+        while True:
+            if next_page and next_page.get("offset"):
+                params["offset"] = next_page["offset"]
+            resp = self.api_client.call_api(
+                f"/workspaces/{workspace_gid}/tasks/search",
+                "GET",
+                query_params=params,
+                response_type=object,
+                auth_settings=["personalAccessToken"],
+                _return_http_data_only=True,
+            )
+            data = None
+            if isinstance(resp, dict):
+                data = resp.get("data")
+                next_page = resp.get("next_page")
+            elif isinstance(resp, list):
+                data = resp
+                next_page = None
+            else:
+                data = getattr(resp, "data", None)
+                next_page = getattr(resp, "next_page", None)
+
+            if data:
+                results.extend(list(data))
+            if not next_page:
+                break
+        return results

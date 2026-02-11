@@ -14,10 +14,13 @@ CREATE TABLE IF NOT EXISTS projects (
     completed_tasks INTEGER,
     tasks_created_last_7d INTEGER,
     tasks_completed_last_7d INTEGER,
+    tasks_modified_last_7d INTEGER,
     raw_data JSONB,
     synced_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS tasks_modified_last_7d INTEGER;
 
 CREATE TABLE IF NOT EXISTS project_changelog (
     id SERIAL PRIMARY KEY,
@@ -88,6 +91,38 @@ CREATE TABLE IF NOT EXISTS sync_log (
     error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS kpi_snapshots (
+    id SERIAL PRIMARY KEY,
+    kpi_id VARCHAR(50) NOT NULL,
+    scope_type VARCHAR(20) NOT NULL,   -- empresa, sponsor, jp
+    scope_value VARCHAR(200) NOT NULL, -- nombre de sponsor/jp o 'Empresa'
+    as_of TIMESTAMP NOT NULL,
+    total_projects INTEGER NOT NULL,
+    compliant_projects INTEGER NOT NULL,
+    kpi_value DECIMAL(5,2) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS projects_history (
+    gid VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(500),
+    owner_gid VARCHAR(50),
+    owner_name VARCHAR(200),
+    status VARCHAR(20),
+    last_status_update_at TIMESTAMP,
+    last_status_update_by VARCHAR(200),
+    pmo_id VARCHAR(100),
+    cliente_nuevo VARCHAR(200),
+    responsable_proyecto VARCHAR(200),
+    sponsor VARCHAR(200),
+    aws_opp_id VARCHAR(200),
+    id_comercial VARCHAR(200),
+    search_text TEXT,
+    raw_data JSONB,
+    snapshot_at TIMESTAMP NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status);
 CREATE INDEX IF NOT EXISTS idx_findings_created ON findings(created_at);
 CREATE INDEX IF NOT EXISTS idx_changelog_project ON project_changelog(project_gid);
+CREATE INDEX IF NOT EXISTS idx_kpi_snapshots ON kpi_snapshots(kpi_id, scope_type, scope_value, as_of);
+CREATE INDEX IF NOT EXISTS idx_projects_history_search ON projects_history(search_text);
