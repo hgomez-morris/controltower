@@ -52,3 +52,4 @@ visibility:
 monitoring:
   new_projects_days: 7
   closing_soon_days: 15
+  no_recent_status_update_days: 90

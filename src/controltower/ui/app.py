@@ -95,6 +95,25 @@ def _humanize_last_update(ts):
         return f"hace {days}d"
     return str(ts)
 
+def _days_since_last_update(ts, today_date=None):
+    if not ts:
+        return ""
+    if today_date is None:
+        today_date = date.today()
+    if isinstance(ts, datetime):
+        dt = ts
+    elif isinstance(ts, str):
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            return ""
+    else:
+        return ""
+    try:
+        return (today_date - dt.date()).days
+    except Exception:
+        return ""
+
 def _fmt_date(val):
     if not val:
         return ""
@@ -1662,6 +1681,7 @@ elif page == "Seguimiento":
     monitoring_cfg = cfg.get("monitoring", {}) if isinstance(cfg, dict) else {}
     new_days_default = int(monitoring_cfg.get("new_projects_days", 7))
     closing_days_default = int(monitoring_cfg.get("closing_soon_days", 15))
+    stale_status_days_default = int(monitoring_cfg.get("no_recent_status_update_days", 90))
 
     fcols = st.columns(4)
     sponsor_query = fcols[0].text_input("Sponsor contiene", value="Abrigo")
@@ -1903,6 +1923,7 @@ elif page == "Seguimiento":
             "Estado": _fmt_status(p.get("status")),
             "Fecha término": _fmt_date(p.get("planned_end_date")),
             "Días a cierre": (p.get("planned_end_date") - today).days if p.get("planned_end_date") else "",
+            "Días sin update": _days_since_last_update(p.get("last_status_update_at"), today),
             "Tareas": _fmt_task_progress(p.get("completed_tasks"), p.get("total_tasks")),
         } for p in closing_projects])
         df_close = df_close.reset_index(drop=True)
@@ -1919,16 +1940,27 @@ elif page == "Seguimiento":
 
         styled = df_close.style.apply(_row_style, axis=1)
         st.dataframe(styled, use_container_width=True, height=260, hide_index=True)
-        st.caption(f"Total: {len(df_close)}")
+        total_count = len(df_close)
+        try:
+            days_series = pd.to_numeric(df_close["Días a cierre"], errors="coerce")
+            total_atrasados = int((days_series < 0).sum())
+            total_cierran_semana = int(((days_series >= 0) & (days_series <= 6)).sum())
+        except Exception:
+            total_atrasados = 0
+            total_cierran_semana = 0
+        c_total, c_stats = st.columns([1, 3])
+        c_total.caption(f"Total: {total_count}")
+        c_stats.caption(f"Atrasados: {total_atrasados} | Cierran esta semana: {total_cierran_semana}")
     else:
         st.info("No hay proyectos con cierre próximo.")
 
-    st.markdown("**Proyectos sin status update (nunca actualizado)**")
+    st.markdown(f"**Proyectos sin status update reciente (≥ {stale_status_days_default} días)**")
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=stale_status_days_default)
     with engine.begin() as conn:
         no_updates = conn.execute(text("""
             SELECT gid, name, owner_name, status, raw_data, last_status_update_at
             FROM projects
-            WHERE last_status_update_at IS NULL
+            WHERE (last_status_update_at IS NULL OR last_status_update_at <= :stale_cutoff)
               AND EXISTS (
                 SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf
                 WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
@@ -1958,6 +1990,7 @@ elif page == "Seguimiento":
               ))
             ORDER BY name ASC
         """), {
+            "stale_cutoff": stale_cutoff,
             "sponsor": sponsor_query.strip(),
             "sponsor_like": f"%{sponsor_query.strip()}%",
             "resp": resp_query.strip(),
@@ -2060,6 +2093,7 @@ elif page == "Seguimiento":
             "Proyecto": p.get("name") or "",
             "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
             "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto"),
+            "Estado": _fmt_status(p.get("status")),
             "Fase": p.get("phase_name") or "",
             "Inicio planificado": _fmt_date(p.get("planned_start_date")),
         } for p in week_start_projects])
