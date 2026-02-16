@@ -7,6 +7,7 @@ import zipfile
 import plotly.express as px
 from openpyxl.utils import get_column_letter
 from datetime import datetime, timezone, date, timedelta
+from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from controltower.db.connection import get_engine
 from controltower.config import load_config
@@ -18,6 +19,7 @@ import re
 st.set_page_config(page_title="PMO Control Tower (MVP)", layout="wide")
 engine = get_engine()
 cfg = load_config("config/config.yaml") if os.path.exists("config/config.yaml") else load_config("config/config.example.yaml")
+CHILE_TZ = ZoneInfo("America/Santiago")
 
 st.markdown("""
 <style>
@@ -257,20 +259,85 @@ def _get_last_sync_label() -> str:
     try:
         if isinstance(ts, str):
             ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        label = ts.strftime("%Y/%m/%d %H:%M")
-        return f"Última actualización: {label}"
+        if isinstance(ts, datetime) and ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        ts_local = ts.astimezone(CHILE_TZ) if isinstance(ts, datetime) else ts
+        label = ts_local.strftime("%Y/%m/%d %H:%M")
+        return f"Última actualización (Chile): {label}"
     except Exception:
         return f"Última actualización: {ts}"
 
 # Sidebar menu only
 with st.sidebar:
     st.header("Menu")
-    page = st.radio("Ir a", ["Dashboard", "Proyectos", "Findings", "Mensajes", "Seguimiento", "KPI", "Búsqueda"], label_visibility="collapsed")
+    page = st.radio("Ir a", ["Dashboard", "Findings", "Mensajes", "Seguimiento", "KPI", "Búsqueda", "Plan de facturación"], label_visibility="collapsed")
     st.markdown(f"<div class='sidebar-footer'>{_get_last_sync_label()}</div>", unsafe_allow_html=True)
 
 if page == "Dashboard":
     st.subheader("Dashboard")
-    sponsor_query = st.text_input("Sponsor contiene", value="Abrigo")
+    with engine.begin() as conn:
+        sponsor_options = conn.execute(text("""
+            SELECT DISTINCT TRIM(COALESCE(cf_s->>'display_value','')) AS sponsor
+            FROM projects p
+            JOIN LATERAL jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
+              ON cf_s->>'name' = 'Sponsor'
+            WHERE TRIM(COALESCE(cf_s->>'display_value','')) <> ''
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+              )
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
+                WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
+                  AND (
+                    (cf_bv->'enum_value'->>'gid') = '1209701308000273'
+                    OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
+                    OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
+                  )
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
+                WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
+                  AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
+              )
+              AND COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'
+            ORDER BY sponsor
+        """)).mappings().all()
+
+        bv_options = conn.execute(text("""
+            SELECT DISTINCT TRIM(COALESCE(cf_bv->>'display_value', cf_bv->'enum_value'->>'name','')) AS bv
+            FROM projects p
+            JOIN LATERAL jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
+              ON (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
+            WHERE TRIM(COALESCE(cf_bv->>'display_value', cf_bv->'enum_value'->>'name','')) <> ''
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+              )
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
+                WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
+                  AND (
+                    (cf_bv2->'enum_value'->>'gid') = '1209701308000273'
+                    OR (cf_bv2->'enum_value'->>'name') = 'Professional Services'
+                    OR COALESCE(cf_bv2->>'display_value','') = 'Professional Services'
+                  )
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
+                WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
+                  AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
+              )
+              AND COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'
+            ORDER BY bv
+        """)).mappings().all()
+
+    sponsor_values = ["(todos)"] + [r["sponsor"] for r in sponsor_options if r.get("sponsor")]
+    bv_values = ["(todos)"] + [r["bv"] for r in bv_options if r.get("bv")]
+
+    fcols = st.columns(2)
+    sponsor_query = fcols[0].selectbox("Sponsor", sponsor_values, index=0)
+    bv_query = fcols[1].selectbox("Business Vertical", bv_values, index=0)
     with engine.begin() as conn:
         counts = conn.execute(text("""
             SELECT
@@ -301,9 +368,16 @@ if page == "Dashboard":
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
               WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
             ))
+            AND (:bv = '' OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
+              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
+                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
+            ))
         """), {
-            "sponsor": sponsor_query.strip(),
-            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
+            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
+            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
         }).mappings().one()
         by_rule = conn.execute(text("""
             SELECT f.rule_id, COUNT(*) AS n
@@ -332,11 +406,18 @@ if page == "Dashboard":
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
               WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
             ))
+            AND (:bv = '' OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
+              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
+                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
+            ))
             GROUP BY f.rule_id
             ORDER BY n DESC
         """), {
-            "sponsor": sponsor_query.strip(),
-            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
+            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
+            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
         }).mappings().all()
 
         by_project_status = conn.execute(text("""
@@ -365,11 +446,18 @@ if page == "Dashboard":
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
               WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
             ))
+            AND (:bv = '' OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
+              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
+                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
+            ))
             GROUP BY project_status
             ORDER BY n DESC
         """), {
-            "sponsor": sponsor_query.strip(),
-            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
+            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
+            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
         }).mappings().all()
     with engine.begin() as conn:
         total_projects = conn.execute(text("""
@@ -398,9 +486,16 @@ if page == "Dashboard":
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
               WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
             ))
+            AND (:bv = '' OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
+              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
+                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
+            ))
         """), {
-            "sponsor": sponsor_query.strip(),
-            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
+            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
+            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
         }).mappings().one()
 
     c1, c2 = st.columns(2)
@@ -1369,14 +1464,19 @@ elif page == "Mensajes":
     st.subheader("Mensajes a Responsables")
     st.caption("Compila un solo mensaje por responsable, con proyectos y reglas transgredidas (sin schedule_risk).")
 
+    sponsor_filter = st.text_input("Sponsor contiene", value="")
+
     # Load responsables list
     with engine.begin() as conn:
         responsables = conn.execute(text("""
             SELECT DISTINCT TRIM(COALESCE(cf->>'display_value','')) AS responsable
             FROM projects p
+            JOIN findings f ON f.project_gid = p.gid
             JOIN LATERAL jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
               ON cf->>'name' = 'Responsable Proyecto'
             WHERE TRIM(COALESCE(cf->>'display_value','')) <> ''
+              AND f.status IN ('open','acknowledged')
+              AND f.rule_id <> 'schedule_risk'
               AND EXISTS (
                 SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_pmo
                 WHERE cf_pmo->>'name' = 'PMO ID' AND COALESCE(cf_pmo->>'display_value','') <> ''
@@ -1395,10 +1495,16 @@ elif page == "Mensajes":
                 WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
                   AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
               )
+              AND (:sponsor = '' OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
+                WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
+              ))
             ORDER BY responsable
-        """)).mappings().all()
+        """), {
+            "sponsor": sponsor_filter.strip(),
+            "sponsor_like": f"%{sponsor_filter.strip()}%",
+        }).mappings().all()
     responsables_list = [r["responsable"] for r in responsables] if responsables else []
-    sponsor_filter = st.text_input("Sponsor contiene", value="Abrigo")
     resp = st.selectbox("Responsable de proyecto", ["(selecciona)"] + responsables_list)
     email_default = _normalize_email_from_name(resp if resp != "(selecciona)" else "")
     email_to = st.text_input("Email (DM)", value=email_default, help="Si está vacío, se envía al canal", key="dm_email")
@@ -2399,100 +2505,352 @@ elif page == "Búsqueda":
     st.subheader("Búsqueda")
     st.caption("Consulta en tablas locales: proyectos sincronizados + históricos. Prioriza sincronizados.")
 
-    search_text = st.text_input("Buscar", placeholder="PMO-ID, Cliente, Nombre, Responsable, AWS OPP ID, ID_Comercial")
-    run_search = st.button("Buscar")
+    if "search_mode" not in st.session_state:
+        st.session_state["search_mode"] = None
+    if "search_query" not in st.session_state:
+        st.session_state["search_query"] = ""
+    if "search_filters" not in st.session_state:
+        st.session_state["search_filters"] = {"status": "", "sponsor": "", "phase": ""}
+    if "use_history" not in st.session_state:
+        st.session_state["use_history"] = False
+    if "use_history_widget" not in st.session_state:
+        st.session_state["use_history_widget"] = st.session_state["use_history"]
+    if "filter_status_widget" not in st.session_state:
+        st.session_state["filter_status_widget"] = "(todos)"
+    if "filter_sponsor_widget" not in st.session_state:
+        st.session_state["filter_sponsor_widget"] = ""
+    if "filter_phase_widget" not in st.session_state:
+        st.session_state["filter_phase_widget"] = ""
+    if "pending_apply" not in st.session_state:
+        st.session_state["pending_apply"] = False
 
-    if (run_search or search_text.strip()) and search_text.strip():
-        q = search_text.strip().lower()
-        with engine.begin() as conn:
-            rows_sync = conn.execute(text("""
-                SELECT p.gid, p.name, p.owner_name, p.due_date, p.status, p.raw_data
-                FROM projects p
-                WHERE (
-                  p.name ILIKE :q
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                    WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') ILIKE :q
-                  )
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                    WHERE cf->>'name' IN ('cliente_nuevo','Cliente_nuevo') AND COALESCE(cf->>'display_value','') ILIKE :q
-                  )
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                    WHERE cf->>'name' = 'Responsable Proyecto' AND COALESCE(cf->>'display_value','') ILIKE :q
-                  )
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                    WHERE cf->>'name' = 'AWS OPP ID' AND COALESCE(cf->>'display_value','') ILIKE :q
-                  )
-                  OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                    WHERE cf->>'name' = 'ID_Comercial' AND COALESCE(cf->>'display_value','') ILIKE :q
-                  )
-                )
-                ORDER BY p.name ASC
-            """), {
-                "q": f"%{q}%",
-            }).mappings().all()
+    search_text = st.text_input(
+        "Buscar",
+        placeholder="PMO-ID, Cliente, Nombre, Responsable, AWS OPP ID, ID_Comercial",
+        key="search_text",
+    )
+    use_history = st.checkbox(
+        "Usar proyectos históricos",
+        value=st.session_state["use_history_widget"],
+        key="use_history_widget",
+    )
 
-            sync_gids = {r.get("gid") for r in rows_sync if r.get("gid")}
+    fcols = st.columns(3)
+    status_options = ["(todos)", "on_track", "at_risk", "off_track", "on_hold", "green", "yellow", "red", "blue"]
+    current_status = st.session_state["filter_status_widget"] or "(todos)"
+    status_index = status_options.index(current_status) if current_status in status_options else 0
+    status_filter = fcols[0].selectbox("Estado", status_options, index=status_index, key="filter_status_widget")
+    sponsor_filter = fcols[1].text_input(
+        "Sponsor contiene",
+        value=st.session_state["filter_sponsor_widget"],
+        key="filter_sponsor_widget",
+    )
+    phase_filter = fcols[2].text_input(
+        "Fase del proyecto contiene",
+        value=st.session_state["filter_phase_widget"],
+        key="filter_phase_widget",
+    )
 
-            rows_hist = conn.execute(text("""
-                SELECT gid, name, owner_name, status, raw_data
-                FROM projects_history
-                WHERE (
-                  search_text ILIKE :q
-                  OR COALESCE(name,'') ILIKE :q
-                  OR COALESCE(pmo_id,'') ILIKE :q
-                  OR COALESCE(cliente_nuevo,'') ILIKE :q
-                  OR COALESCE(responsable_proyecto,'') ILIKE :q
-                  OR COALESCE(aws_opp_id,'') ILIKE :q
-                  OR COALESCE(id_comercial,'') ILIKE :q
-                )
-                ORDER BY name ASC
-            """), {
-                "q": f"%{q}%",
-            }).mappings().all()
+    bcols = st.columns(4)
+    run_search = bcols[0].button("Buscar")
+    run_list_all = bcols[1].button("Listar todos")
+    apply_filters = bcols[2].button("Aplicar filtros")
+    clear_filters = bcols[3].button("Limpiar filtros")
 
-        rows = []
-        for r in rows_sync:
-            raw = (r.get("raw_data") or {}).get("project") or {}
-            cf_map = _custom_field_map(raw)
-            row = {
-                "gid": r.get("gid"),
-                "name": r.get("name"),
-                "owner_name": r.get("owner_name"),
-                "due_date": r.get("due_date"),
-                "status": r.get("status"),
-                "source": "sync",
-            }
-            for k, v in cf_map.items():
-                row[f"cf:{k}"] = v
-            rows.append(row)
+    if run_search:
+        st.session_state["search_mode"] = "search"
+        st.session_state["search_query"] = (search_text or "").strip()
+        st.session_state["pending_apply"] = True
+    if run_list_all:
+        st.session_state["search_mode"] = "list_all"
+        st.session_state["search_query"] = ""
+        st.session_state["pending_apply"] = True
+    if clear_filters:
+        st.session_state["search_filters"] = {"status": "", "sponsor": "", "phase": ""}
+        st.session_state["filter_status_widget"] = "(todos)"
+        st.session_state["filter_sponsor_widget"] = ""
+        st.session_state["filter_phase_widget"] = ""
+        st.session_state["pending_apply"] = True
+        st.info("Filtros limpiados.")
 
-        for r in rows_hist:
-            if r.get("gid") in sync_gids:
-                continue
-            raw = (r.get("raw_data") or {}).get("project") or {}
-            cf_map = _custom_field_map(raw)
-            row = {
-                "gid": r.get("gid"),
-                "name": r.get("name"),
-                "owner_name": r.get("owner_name"),
-                "due_date": raw.get("due_date") or raw.get("due_on"),
-                "status": r.get("status"),
-                "source": "history",
-            }
-            for k, v in cf_map.items():
-                row[f"cf:{k}"] = v
-            rows.append(row)
+    if apply_filters:
+        status_val = "" if status_filter == "(todos)" else status_filter
+        st.session_state["search_filters"] = {
+            "status": status_val,
+            "sponsor": sponsor_filter.strip(),
+            "phase": phase_filter.strip(),
+        }
+        st.session_state["use_history"] = bool(use_history)
+        st.session_state["pending_apply"] = False
 
-        if rows:
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, height=520, hide_index=True)
-            st.caption(f"Total: {len(df)}")
+        mode = st.session_state.get("search_mode")
+        query = (st.session_state.get("search_query") or "").strip()
+        filters = st.session_state["search_filters"]
+
+        if mode is None:
+            st.warning("Usa 'Buscar' o 'Listar todos' antes de aplicar filtros.")
+        elif mode == "search" and not query:
+            st.warning("Ingresa un texto de búsqueda o usa 'Listar todos'.")
         else:
-            st.info("No se encontraron proyectos para la búsqueda.")
-    elif run_search:
-        st.warning("Ingresa un texto de búsqueda.")
+            with engine.begin() as conn:
+                where_sync = []
+                params_sync = {}
+                if mode == "search":
+                    where_sync.append("""
+                        (
+                          p.name ILIKE :q
+                          OR EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                            WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') ILIKE :q
+                          )
+                          OR EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                            WHERE cf->>'name' IN ('cliente_nuevo','Cliente_nuevo') AND COALESCE(cf->>'display_value','') ILIKE :q
+                          )
+                          OR EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                            WHERE cf->>'name' = 'Responsable Proyecto' AND COALESCE(cf->>'display_value','') ILIKE :q
+                          )
+                          OR EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                            WHERE cf->>'name' = 'AWS OPP ID' AND COALESCE(cf->>'display_value','') ILIKE :q
+                          )
+                          OR EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                            WHERE cf->>'name' = 'ID_Comercial' AND COALESCE(cf->>'display_value','') ILIKE :q
+                          )
+                        )
+                    """)
+                    params_sync["q"] = f"%{query}%"
+                if filters.get("status"):
+                    where_sync.append("p.status = :status")
+                    params_sync["status"] = filters["status"]
+                if filters.get("sponsor"):
+                    where_sync.append("""
+                        EXISTS (
+                          SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
+                          WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
+                        )
+                    """)
+                    params_sync["sponsor_like"] = f"%{filters['sponsor']}%"
+                if filters.get("phase"):
+                    where_sync.append("""
+                        EXISTS (
+                          SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
+                          WHERE cf_phase->>'name' = 'Fase del proyecto' AND COALESCE(cf_phase->>'display_value','') ILIKE :phase_like
+                        )
+                    """)
+                    params_sync["phase_like"] = f"%{filters['phase']}%"
+
+                sql_sync = """
+                    SELECT p.gid, p.name, p.owner_name, p.due_date, p.status, p.raw_data
+                    FROM projects p
+                """
+                if where_sync:
+                    sql_sync += " WHERE " + " AND ".join(where_sync)
+                sql_sync += " ORDER BY p.name ASC"
+
+                rows_sync = conn.execute(text(sql_sync), params_sync).mappings().all()
+                sync_gids = {r.get("gid") for r in rows_sync if r.get("gid")}
+
+                rows_hist = []
+                if st.session_state.get("use_history"):
+                    where_hist = []
+                    params_hist = {}
+                    if mode == "search":
+                        where_hist.append("""
+                            (
+                              search_text ILIKE :q
+                              OR COALESCE(name,'') ILIKE :q
+                              OR COALESCE(pmo_id,'') ILIKE :q
+                              OR COALESCE(cliente_nuevo,'') ILIKE :q
+                              OR COALESCE(responsable_proyecto,'') ILIKE :q
+                              OR COALESCE(aws_opp_id,'') ILIKE :q
+                              OR COALESCE(id_comercial,'') ILIKE :q
+                            )
+                        """)
+                        params_hist["q"] = f"%{query}%"
+                    if filters.get("status"):
+                        where_hist.append("status = :status")
+                        params_hist["status"] = filters["status"]
+                    if filters.get("sponsor"):
+                        where_hist.append("COALESCE(sponsor,'') ILIKE :sponsor_like")
+                        params_hist["sponsor_like"] = f"%{filters['sponsor']}%"
+                    if filters.get("phase"):
+                        where_hist.append("""
+                            EXISTS (
+                              SELECT 1 FROM jsonb_array_elements(raw_data->'project'->'custom_fields') cf_phase
+                              WHERE cf_phase->>'name' = 'Fase del proyecto' AND COALESCE(cf_phase->>'display_value','') ILIKE :phase_like
+                            )
+                        """)
+                        params_hist["phase_like"] = f"%{filters['phase']}%"
+
+                    sql_hist = """
+                        SELECT gid, name, owner_name, status, raw_data
+                        FROM projects_history
+                    """
+                    if where_hist:
+                        sql_hist += " WHERE " + " AND ".join(where_hist)
+                    sql_hist += " ORDER BY name ASC"
+
+                    rows_hist = conn.execute(text(sql_hist), params_hist).mappings().all()
+
+            rows = []
+            for r in rows_sync:
+                raw = (r.get("raw_data") or {}).get("project") or {}
+                cf_map = _custom_field_map(raw)
+                row = {
+                    "gid": r.get("gid"),
+                    "name": r.get("name"),
+                    "owner_name": r.get("owner_name"),
+                    "due_date": r.get("due_date"),
+                    "status": r.get("status"),
+                    "source": "sync",
+                }
+                for k, v in cf_map.items():
+                    row[f"cf:{k}"] = v
+                rows.append(row)
+
+            for r in rows_hist:
+                if r.get("gid") in sync_gids:
+                    continue
+                raw = (r.get("raw_data") or {}).get("project") or {}
+                cf_map = _custom_field_map(raw)
+                row = {
+                    "gid": r.get("gid"),
+                    "name": r.get("name"),
+                    "owner_name": r.get("owner_name"),
+                    "due_date": raw.get("due_date") or raw.get("due_on"),
+                    "status": r.get("status"),
+                    "source": "history",
+                }
+                for k, v in cf_map.items():
+                    row[f"cf:{k}"] = v
+                rows.append(row)
+
+            if rows:
+                df = pd.DataFrame(rows)
+                st.dataframe(df, use_container_width=True, height=520, hide_index=True)
+                st.caption(f"Total: {len(df)}")
+            else:
+                st.info("No se encontraron proyectos para los filtros aplicados.")
+    elif st.session_state.get("pending_apply"):
+        st.info("Presiona 'Aplicar filtros' para ejecutar la consulta.")
+
+elif page == "Plan de facturación":
+    st.subheader("Plan de facturación")
+    st.caption("Proyectos con custom field 'En plan de facturación' = SI.")
+
+    sponsor_filter = st.text_input("Sponsor contiene", value="", key="billing_sponsor_filter")
+
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT p.gid, p.name, p.owner_name, p.due_date, p.status, p.raw_data
+            FROM projects p
+            WHERE EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_plan
+              WHERE cf_plan->>'name' = 'En plan de facturación'
+                AND lower(COALESCE(cf_plan->>'display_value','')) = 'si'
+            )
+            AND (:sponsor = '' OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
+              WHERE cf_s->>'name' = 'Sponsor'
+                AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
+            ))
+            ORDER BY p.name ASC
+        """), {
+            "sponsor": sponsor_filter.strip(),
+            "sponsor_like": f"%{sponsor_filter.strip()}%",
+        }).mappings().all()
+
+    def _is_terminated(p):
+        raw = (p.get("raw_data") or {}).get("project") or {}
+        phase = (_cf_value_from_project_row(p, "Fase del proyecto") or "").strip().lower()
+        completed = str(raw.get("completed", "")).lower() == "true"
+        return completed or ("terminad" in phase) or ("cancelad" in phase)
+
+    def _is_risk(status):
+        return (status or "").lower() in {"at_risk", "off_track", "on_hold", "yellow", "red", "blue"}
+
+    if rows:
+        df = pd.DataFrame([{
+            "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+            "Proyecto": p.get("name") or "",
+            "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or p.get("owner_name") or "",
+            "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+            "Fase del proyecto": _cf_value_from_project_row(p, "Fase del proyecto"),
+            "Término estimado": _fmt_date(
+                _cf_first_value((p.get("raw_data") or {}).get("project") or {}, ["Fecha Planificada Termino del proyecto"])
+                or (p.get("raw_data") or {}).get("project", {}).get("due_date")
+                or (p.get("raw_data") or {}).get("project", {}).get("due_on")
+                or p.get("due_date")
+            ),
+            "Total presupuestado": _cf_first_value(
+                (p.get("raw_data") or {}).get("project") or {},
+                ["Total presupuestado", "Presupuesto total", "Budget", "Total Budget"],
+            ),
+            "Estado": _fmt_status(p.get("status")),
+            "status_raw": (p.get("status") or ""),
+            "Terminado": "Sí" if _is_terminated(p) else "No",
+        } for p in rows])
+
+        def _style_row(row):
+            status_label = row.get("status_raw") or row.get("Estado") or ""
+            status_norm = str(status_label).strip().lower().replace(" ", "_")
+            if status_norm in {"complete", "completed"}:
+                return ["background-color: #1e7e34; color: white"] * len(row)
+            if status_norm in {"on_track", "green"}:
+                return ["background-color: #d4edda"] * len(row)
+            return ["background-color: #f8d7da"] * len(row)
+
+        def _sort_rank(row):
+            status_label = row.get("status_raw") or row.get("Estado") or ""
+            status_norm = str(status_label).strip().lower().replace(" ", "_")
+            if status_norm in {"complete", "completed"}:
+                return 0
+            if status_norm in {"on_track", "green"}:
+                return 1
+            return 2
+
+        df["_sort_rank"] = df.apply(_sort_rank, axis=1)
+        df = df.sort_values(by=["_sort_rank", "Proyecto"], kind="mergesort").reset_index(drop=True)
+        styled = df.drop(columns=["status_raw", "_sort_rank"], errors="ignore").style.apply(_style_row, axis=1)
+        st.dataframe(styled, use_container_width=True, height=520, hide_index=True)
+        st.caption(f"Total: {len(df)}")
+
+        budget_values = df["Total presupuestado"].apply(_parse_budget)
+        df_budget = df.assign(_budget=budget_values)
+        total_budget = float(df_budget["_budget"].fillna(0).sum())
+        by_status = (
+            df_budget.groupby("Estado", dropna=False)["_budget"]
+            .sum()
+            .reset_index()
+            .rename(columns={"_budget": "Presupuesto"})
+        )
+        if total_budget > 0:
+            by_status["Porcentaje"] = by_status["Presupuesto"] / total_budget * 100.0
+            def _status_color_key(label):
+                norm = str(label or "").strip().lower().replace(" ", "_")
+                if norm in {"complete", "completed"}:
+                    return "complete"
+                if norm in {"on_track", "green"}:
+                    return "on_track"
+                return "other"
+
+            color_map = {}
+            for label in by_status["Estado"].tolist():
+                key = _status_color_key(label)
+                if key == "complete":
+                    color_map[label] = "#1e7e34"
+                elif key == "on_track":
+                    color_map[label] = "#d4edda"
+                else:
+                    color_map[label] = "#f8d7da"
+
+            fig = px.pie(by_status, values="Presupuesto", names="Estado", color="Estado", color_discrete_map=color_map)
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(f"Total presupuestado: {total_budget:,.2f}")
+        else:
+            st.info("No hay monto presupuestado para calcular porcentajes por estado.")
+    else:
+        st.info("No hay proyectos en plan de facturación para el filtro seleccionado.")
