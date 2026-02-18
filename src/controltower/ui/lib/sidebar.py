@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import streamlit as st
 from sqlalchemy import text
@@ -47,6 +47,8 @@ def _get_last_sync_label() -> str:
         return "Sync: sin registros"
     ts = row.get("completed_at") or row.get("started_at")
     if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
         label = ts.astimezone(CHILE_TZ).strftime("%Y-%m-%d %H:%M")
     else:
         label = str(ts)[:16] if ts else ""

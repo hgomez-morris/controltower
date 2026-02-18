@@ -1,4 +1,5 @@
 ﻿from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -13,11 +14,16 @@ def _format_sync_minute(value) -> str:
     if not value:
         return ""
     try:
+        chile_tz = ZoneInfo("America/Santiago")
         if isinstance(value, datetime):
-            return value.astimezone(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d %H:%M")
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=ZoneInfo("UTC"))
+            return value.astimezone(chile_tz).strftime("%Y-%m-%d %H:%M")
         normalized = value.replace("Z", "+00:00")
         dt = datetime.fromisoformat(normalized)
-        return dt.astimezone(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d %H:%M")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(chile_tz).strftime("%Y-%m-%d %H:%M")
     except Exception:
         return str(value)[:16]
 
