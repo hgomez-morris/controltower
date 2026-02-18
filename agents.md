@@ -5,7 +5,7 @@ El objetivo es **implementar el MVP** del PMO Control Tower con:
 - Sync read-only desde Asana (manual o programado)
 - Cálculo de reglas y hallazgos
 - Persistencia en PostgreSQL
-- Mensajería vía Slack (webhook + bot para DM)
+- Mensajería vía Slack (webhook + bot para DM) **deshabilitada por defecto**
 - UI Streamlit para visualización y filtros
 
 ## 0) Principio de seguridad (NO NEGOCIABLE)
@@ -78,6 +78,7 @@ En MVP la visibilidad es **solo JP → PMO**.
 - Mensaje consolidado por responsable:
   - Un solo mensaje con PMO-ID, nombre y motivo.
   - Excluye `schedule_risk`.
+**Estado actual:** envío a Slack está comentado en `scripts/run_sync.py`. Rehabilitar cuando se quiera combinar alertas Asana + Clockify.
 
 ## 7) Status updates y comentarios
 Se almacenan en tablas:
@@ -101,6 +102,10 @@ Variables en `.env`:
 - `SLACK_CHANNEL`
 - `SLACK_BOT_TOKEN`
 - `DB_*`
+Variables adicionales (Clockify):
+- `CLOCKIFY_API_KEY`
+- `CLOCKIFY_WORKSPACE_ID`
+- `CLOCKIFY_BASE_URL` (opcional; default `https://api.clockify.me/api/v1`)
 
 ## 9) Entornos
 ### Desarrollo local
@@ -115,6 +120,21 @@ Variables en `.env`:
    - `export PYTHONPATH="$(pwd)/src"`
 3) Ejecutar sync:
    - `python scripts/run_sync.py`
+
+### Sync Clockify (manual)
+- Script: `python scripts/run_clockify_sync.py`
+- Modos:
+  - Incremental ventana: `python scripts/run_clockify_sync.py --incremental-days 30`
+  - Rango explícito: `python scripts/run_clockify_sync.py --start 2025-01-01T00:00:00Z --end 2025-10-31T23:59:59Z`
+
+### Orquestación (Asana + Clockify)
+`scripts/run_sync.py` ejecuta:
+1) Sync Asana
+2) Rules
+3) Sync Clockify
+   - A las **09:00 (Chile)** usa `--incremental-days 90`
+   - El resto de corridas usa `--incremental-days 7`
+4) Slack **comentado** (deshabilitado)
 
 ### Sync paralelo (opcional)
 - Script: `python scripts/run_sync_parallel.py`
@@ -131,12 +151,30 @@ Luego, crear una tarea con el trigger “Daily” y “Repeat task every: 4 hour
 
 ### Producción MVP
 - Puede correr en EC2/servidor interno
-- Cron del sistema ejecuta sync cada 2h
+- Cron del sistema ejecuta sync cada 2h (a las 09:00 corre Clockify con 90 días)
 - Streamlit sirve UI interna
 
 ### Búsqueda local
 La página “Búsqueda” consulta primero `projects` (sync) y luego `projects_history`.
 Si un `gid` existe en ambas, se muestra la versión de `projects`.
+
+## 13) UI (arquitectura multipágina)
+- `src/controltower/ui/app.py` es un **router mínimo** (menú custom en sidebar).
+- Las páginas están en `src/controltower/ui/ui_pages/` y cada una expone `render()`.
+- Utilidades compartidas: `src/controltower/ui/lib/`:
+  - `common.py` (formatos, helpers, custom fields)
+  - `context.py` (engine/cfg/CHILE_TZ)
+  - `db_admin.py` (ensure tables)
+  - `sidebar.py` (estilos + footer sync Asana)
+
+## 14) Pagos (nuevo)
+- Tablas:
+  - `payments` (pmo_id, status `estimado|efectuado`, payment_date, glosa)
+  - `payment_estimate_history` (historial de cambios de fecha de estimados)
+- Página: `Pagos` en UI (registro y actualización).
+- En “Plan de facturación”:
+  - Se muestra **último pago** (por `created_at`) y estado.
+  - Si hay más de un pago, se añade sufijo `m++` en la fecha.
 
 ## 10) Definition of Done (MVP)
 - [ ] Sync funciona para 100–150 proyectos activos sin fallar
