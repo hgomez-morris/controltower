@@ -5,6 +5,7 @@ import pandas as pd
 import io
 import zipfile
 import plotly.express as px
+from streamlit_plotly_events import plotly_events
 from openpyxl.utils import get_column_letter
 from datetime import datetime, timezone, date, timedelta
 from zoneinfo import ZoneInfo
@@ -97,7 +98,7 @@ def _humanize_last_update(ts):
 
 def _days_since_last_update(ts, today_date=None):
     if not ts:
-        return ""
+        return None
     if today_date is None:
         today_date = date.today()
     if isinstance(ts, datetime):
@@ -106,13 +107,13 @@ def _days_since_last_update(ts, today_date=None):
         try:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except Exception:
-            return ""
+            return None
     else:
-        return ""
+        return None
     try:
         return (today_date - dt.date()).days
     except Exception:
-        return ""
+        return None
 
 def _fmt_date(val):
     if not val:
@@ -238,6 +239,33 @@ def _ensure_kpi_tables() -> None:
             ADD COLUMN IF NOT EXISTS tasks_modified_last_7d INTEGER
         """))
 
+def _ensure_payments_tables() -> None:
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY,
+                project_gid VARCHAR(50),
+                pmo_id VARCHAR(100) NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                payment_date DATE NOT NULL,
+                glosa TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS payment_estimate_history (
+                id SERIAL PRIMARY KEY,
+                payment_id INTEGER NOT NULL,
+                old_date DATE,
+                new_date DATE,
+                changed_at TIMESTAMP DEFAULT NOW(),
+                FOREIGN KEY (payment_id) REFERENCES payments(id)
+            )
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS idx_payments_pmo_id ON payments(pmo_id)"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS idx_payments_project ON payments(project_gid)"""))
+
 def _cf_value_from_project_raw(project_raw: dict, field_name: str) -> str:
     if not project_raw:
         return ""
@@ -289,7 +317,7 @@ def _get_last_sync_label() -> str:
 # Sidebar menu only
 with st.sidebar:
     st.header("Menu")
-    page = st.radio("Ir a", ["Dashboard", "Findings", "Mensajes", "Seguimiento", "KPI", "Búsqueda", "Plan de facturación"], label_visibility="collapsed")
+    page = st.radio("Ir a", ["Dashboard", "Findings", "Mensajes", "Seguimiento", "KPI", "Búsqueda", "Plan de facturación", "Pagos"], label_visibility="collapsed")
     st.markdown(f"<div class='sidebar-footer'>{_get_last_sync_label()}</div>", unsafe_allow_html=True)
 
 if page == "Dashboard":
@@ -357,6 +385,9 @@ if page == "Dashboard":
     fcols = st.columns(2)
     sponsor_query = fcols[0].selectbox("Sponsor", sponsor_values, index=0)
     bv_query = fcols[1].selectbox("Business Vertical", bv_values, index=0)
+
+    if "dashboard_pie_selection" not in st.session_state:
+        st.session_state["dashboard_pie_selection"] = None
     with engine.begin() as conn:
         counts = conn.execute(text("""
             SELECT
@@ -581,8 +612,8 @@ if page == "Dashboard":
                 "r1": rule_a,
                 "r2": rule_b,
                 "r3": rule_c,
-                "sponsor": sponsor_query.strip(),
-                "sponsor_like": f"%{sponsor_query.strip()}%",
+                "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+                "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
             }).mappings().all()
 
         sets = {rule_a: set(), rule_b: set(), rule_c: set()}
@@ -665,11 +696,18 @@ if page == "Dashboard":
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
               WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
             ))
+            AND (:bv = '' OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
+              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
+                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
+            ))
             GROUP BY responsable
             ORDER BY n DESC
         """), {
-            "sponsor": sponsor_query.strip(),
-            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
+            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
+            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
         }).mappings().all()
 
     pie_cols = st.columns(2)
@@ -678,6 +716,17 @@ if page == "Dashboard":
         if by_project_status:
             df_status = pd.DataFrame(by_project_status).rename(columns={"n": "Cantidad"})
             df_status["project_status_label"] = df_status["project_status"].apply(_fmt_status)
+            status_map = {}
+            for r in by_project_status:
+                label = _fmt_status(r.get("project_status"))
+                status_map.setdefault(label, set()).add(r.get("project_status"))
+            df_status["Cantidad"] = pd.to_numeric(df_status["Cantidad"], errors="coerce").fillna(0)
+            df_status = (
+                df_status.groupby("project_status_label", dropna=False)["Cantidad"]
+                .sum()
+                .reset_index()
+            )
+            df_status["Cantidad"] = pd.to_numeric(df_status["Cantidad"], errors="coerce").fillna(0).astype(float)
             status_colors = {
                 "On track": "#2e7d32",
                 "At risk": "#f9a825",
@@ -693,17 +742,154 @@ if page == "Dashboard":
                 color="project_status_label",
                 color_discrete_map=status_colors,
             )
-            st.plotly_chart(fig_status, use_container_width=True)
+            selected = plotly_events(
+                fig_status,
+                click_event=True,
+                select_event=False,
+                hover_event=False,
+                key="dashboard_pie_status",
+            )
+            if selected:
+                point = selected[0] or {}
+                label = point.get("label")
+                if label is None:
+                    idx = point.get("pointNumber")
+                    if idx is not None and 0 <= int(idx) < len(df_status):
+                        label = df_status.iloc[int(idx)]["project_status_label"]
+                label = label or ""
+                st.session_state["dashboard_pie_selection"] = {
+                    "type": "status",
+                    "label": label,
+                    "raw_statuses": sorted({s for s in status_map.get(label, set()) if s is not None}),
+                }
         else:
             st.info("No hay datos para mostrar.")
     with pie_cols[1]:
         st.markdown("**Proyectos por responsable**")
         if by_responsable:
             df_resp = pd.DataFrame(by_responsable).rename(columns={"n": "Cantidad"})
+            df_resp["Cantidad"] = pd.to_numeric(df_resp["Cantidad"], errors="coerce").fillna(0).astype(float)
             fig_resp = px.pie(df_resp, values="Cantidad", names="responsable")
-            st.plotly_chart(fig_resp, use_container_width=True)
+            selected = plotly_events(
+                fig_resp,
+                click_event=True,
+                select_event=False,
+                hover_event=False,
+                key="dashboard_pie_responsable",
+            )
+            if selected:
+                point = selected[0] or {}
+                responsable = point.get("label")
+                if responsable is None:
+                    idx = point.get("pointNumber")
+                    if idx is not None and 0 <= int(idx) < len(df_resp):
+                        responsable = df_resp.iloc[int(idx)]["responsable"]
+                responsable = responsable or ""
+                st.session_state["dashboard_pie_selection"] = {
+                    "type": "responsable",
+                    "label": responsable,
+                }
         else:
             st.info("No hay datos para mostrar.")
+
+    sel = st.session_state.get("dashboard_pie_selection") or {}
+    if sel:
+        st.markdown("**Proyectos del segmento seleccionado**")
+        with engine.begin() as conn:
+            where = []
+            params = {
+                "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+                "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
+                "bv": "" if bv_query == "(todos)" else bv_query.strip(),
+                "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
+            }
+            where.append("""
+                EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                  WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
+                )
+            """)
+            where.append("""
+                EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
+                  WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
+                    AND (
+                      (cf_bv->'enum_value'->>'gid') = '1209701308000273'
+                      OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
+                      OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
+                    )
+                )
+            """)
+            where.append("""
+                NOT EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
+                  WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
+                    AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%'
+                      OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
+                )
+            """)
+            where.append("COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'")
+            where.append("""(:sponsor = '' OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
+                WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
+            ))""")
+            where.append("""(:bv = '' OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
+                WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
+                  AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
+            ))""")
+
+            if sel.get("type") == "status":
+                raw_statuses = sel.get("raw_statuses") or []
+                raw_statuses = [s for s in raw_statuses if s]
+                clauses = []
+                if raw_statuses:
+                    clauses.append("p.status = ANY(:status_in)")
+                    params["status_in"] = raw_statuses
+                if sel.get("label") == "(Sin Status)":
+                    clauses.append("(p.status IS NULL OR p.status = '')")
+                if clauses:
+                    where.append("(" + " OR ".join(clauses) + ")")
+            elif sel.get("type") == "responsable":
+                resp = (sel.get("label") or "").strip()
+                if resp.lower() == "(sin responsable)":
+                    where.append("""
+                        NOT EXISTS (
+                          SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_r
+                          WHERE cf_r->>'name' = 'Responsable Proyecto' AND COALESCE(cf_r->>'display_value','') <> ''
+                        )
+                    """)
+                else:
+                    where.append("""
+                        EXISTS (
+                          SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_r
+                          WHERE cf_r->>'name' = 'Responsable Proyecto' AND COALESCE(cf_r->>'display_value','') ILIKE :resp_like
+                        )
+                    """)
+                    params["resp_like"] = f"%{resp}%"
+
+            sql = """
+                SELECT p.gid, p.name, p.owner_name, p.status, p.raw_data
+                FROM projects p
+            """
+            if where:
+                sql += " WHERE " + " AND ".join(where)
+            sql += " ORDER BY p.name ASC"
+            rows = conn.execute(text(sql), params).mappings().all()
+
+        if rows:
+            df_sel = pd.DataFrame([{
+                "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+                "Proyecto": p.get("name") or "",
+                "Cliente": _cf_value_from_project_row(p, "cliente_nuevo"),
+                "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto"),
+                "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
+                "Estado": _fmt_status(p.get("status")),
+            } for p in rows])
+            st.dataframe(df_sel, use_container_width=True, height=360, hide_index=True)
+            st.caption(f"Total: {len(df_sel)}")
+        else:
+            st.info("No hay proyectos para el segmento seleccionado.")
 
     st.markdown("**Proyectos por semana de cierre (futuro)**")
     with engine.begin() as conn:
@@ -745,8 +931,8 @@ if page == "Dashboard":
                 WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
               ))
         """), {
-            "sponsor": sponsor_query.strip(),
-            "sponsor_like": f"%{sponsor_query.strip()}%",
+            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
+            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
         }).mappings().all()
 
     if closing_dates:
@@ -2584,7 +2770,6 @@ elif page == "Búsqueda":
         value=st.session_state["filter_phase_widget"],
         key="filter_phase_widget",
     )
-
     bcols = st.columns(4)
     run_search = bcols[0].button("Buscar")
     run_list_all = bcols[1].button("Listar todos")
@@ -2594,11 +2779,11 @@ elif page == "Búsqueda":
     if run_search:
         st.session_state["search_mode"] = "search"
         st.session_state["search_query"] = (search_text or "").strip()
-        st.session_state["pending_apply"] = True
+        st.session_state["pending_apply"] = False
     if run_list_all:
         st.session_state["search_mode"] = "list_all"
         st.session_state["search_query"] = ""
-        st.session_state["pending_apply"] = True
+        st.session_state["pending_apply"] = False
     if clear_filters:
         st.session_state["search_filters"] = {"status": "", "sponsor": "", "phase": ""}
         st.session_state["filter_status_widget"] = "(todos)"
@@ -2607,7 +2792,8 @@ elif page == "Búsqueda":
         st.session_state["pending_apply"] = True
         st.info("Filtros limpiados.")
 
-    if apply_filters:
+    should_run = apply_filters or run_search or run_list_all
+    if should_run:
         status_val = "" if status_filter == "(todos)" else status_filter
         st.session_state["search_filters"] = {
             "status": status_val,
@@ -2675,7 +2861,6 @@ elif page == "Búsqueda":
                         )
                     """)
                     params_sync["phase_like"] = f"%{filters['phase']}%"
-
                 sql_sync = """
                     SELECT p.gid, p.name, p.owner_name, p.due_date, p.status, p.raw_data
                     FROM projects p
@@ -2718,7 +2903,6 @@ elif page == "Búsqueda":
                             )
                         """)
                         params_hist["phase_like"] = f"%{filters['phase']}%"
-
                     sql_hist = """
                         SELECT gid, name, owner_name, status, raw_data
                         FROM projects_history
@@ -2774,17 +2958,36 @@ elif page == "Búsqueda":
 elif page == "Plan de facturación":
     st.subheader("Plan de facturación")
     st.caption("Proyectos con custom field 'En plan de facturación' = SI.")
+    _ensure_payments_tables()
 
     sponsor_filter = st.text_input("Sponsor contiene", value="", key="billing_sponsor_filter")
 
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT p.gid, p.name, p.owner_name, p.due_date, p.status, p.raw_data
+            SELECT p.gid, p.name, p.owner_name, p.due_date, p.status, p.raw_data, p.last_status_update_at,
+                   pmo.pmo_id AS pmo_id,
+                   pay.payment_date AS last_payment_date,
+                   pay.status AS payment_status,
+                   pay.payments_count AS payments_count
             FROM projects p
+            LEFT JOIN LATERAL (
+              SELECT COALESCE(cf_pmo->>'display_value','') AS pmo_id
+              FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_pmo
+              WHERE cf_pmo->>'name' = 'PMO ID'
+              LIMIT 1
+            ) pmo ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT payment_date, status,
+                     (SELECT COUNT(*) FROM payments WHERE pmo_id = pmo.pmo_id) AS payments_count
+              FROM payments
+              WHERE pmo_id = pmo.pmo_id
+              ORDER BY created_at DESC NULLS LAST, payment_date DESC NULLS LAST
+              LIMIT 1
+            ) pay ON TRUE
             WHERE EXISTS (
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_plan
-              WHERE cf_plan->>'name' = 'En plan de facturación'
-                AND lower(COALESCE(cf_plan->>'display_value','')) = 'si'
+              WHERE lower(COALESCE(cf_plan->>'name','')) LIKE 'en plan de fact%'
+                AND lower(trim(COALESCE(cf_plan->>'display_value',''))) IN ('si', 'sí')
             )
             AND (:sponsor = '' OR EXISTS (
               SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
@@ -2823,6 +3026,13 @@ elif page == "Plan de facturación":
                 (p.get("raw_data") or {}).get("project") or {},
                 ["Total presupuestado", "Presupuesto total", "Budget", "Total Budget"],
             ),
+            "Fecha pago": (
+                f"{_fmt_date(p.get('last_payment_date'))} m++"
+                if (p.get("last_payment_date") and (p.get("payments_count") or 0) > 1)
+                else _fmt_date(p.get("last_payment_date"))
+            ),
+            "Estado pago": (p.get("payment_status") or "").title(),
+            "Días desde último update": _days_since_last_update(p.get("last_status_update_at")),
             "Estado": _fmt_status(p.get("status")),
             "status_raw": (p.get("status") or ""),
             "Terminado": "Sí" if _is_terminated(p) else "No",
@@ -2882,7 +3092,116 @@ elif page == "Plan de facturación":
                     color_map[label] = "#f8d7da"
 
             fig = px.pie(by_status, values="Presupuesto", names="Estado", color="Estado", color_discrete_map=color_map)
-            st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
+
+elif page == "Pagos":
+    st.subheader("Pagos")
+    _ensure_payments_tables()
+
+    pmo_id_input = st.text_input("PMO-ID")
+    if pmo_id_input.strip():
+        pmo_id = pmo_id_input.strip()
+        with engine.begin() as conn:
+            projects = conn.execute(text("""
+                SELECT p.gid, p.name
+                FROM projects p
+                WHERE EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
+                  WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') = :pmo
+                )
+                LIMIT 5
+            """), {"pmo": pmo_id}).mappings().all()
+
+        project_gid = ""
+        project_name = ""
+        if projects:
+            if len(projects) == 1:
+                project_gid = projects[0].get("gid") or ""
+                project_name = projects[0].get("name") or ""
+            else:
+                options = [f"{p.get('gid')} | {p.get('name')}" for p in projects]
+                sel = st.selectbox("Proyecto", options)
+                if sel:
+                    project_gid = sel.split("|")[0].strip()
+                    for p in projects:
+                        if p.get("gid") == project_gid:
+                            project_name = p.get("name") or ""
+                            break
+        else:
+            st.info("No se encontró proyecto con ese PMO-ID en la base local.")
+
+        if project_name:
+            st.caption(f"Proyecto: {project_name}")
+
+        with engine.begin() as conn:
+            payments = conn.execute(text("""
+                SELECT id, project_gid, pmo_id, status, payment_date, glosa, created_at, updated_at
+                FROM payments
+                WHERE pmo_id = :pmo
+                ORDER BY payment_date ASC NULLS LAST, created_at ASC
+            """), {"pmo": pmo_id}).mappings().all()
+
+        st.markdown("**Pagos registrados**")
+        if payments:
+            df_pay = pd.DataFrame([{
+                "ID": r.get("id"),
+                "Estado": r.get("status"),
+                "Fecha": _fmt_date(r.get("payment_date")),
+                "Glosa": r.get("glosa") or "",
+                "Creado": _fmt_date(r.get("created_at")),
+            } for r in payments])
+            st.dataframe(df_pay, use_container_width=True, height=260, hide_index=True)
+        else:
+            st.info("No hay pagos registrados para este PMO-ID.")
+
+        st.markdown("**Registrar nuevo pago**")
+        with st.form("new_payment"):
+            status_new = st.selectbox("Estado", ["Estimado", "Efectuado"])
+            date_new = st.date_input("Fecha")
+            glosa_new = st.text_area("Glosa", height=80)
+            submitted = st.form_submit_button("Guardar pago")
+            if submitted:
+                status_db = "estimado" if status_new == "Estimado" else "efectuado"
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO payments (project_gid, pmo_id, status, payment_date, glosa)
+                        VALUES (:gid, :pmo, :status, :fecha, :glosa)
+                    """), {
+                        "gid": project_gid or None,
+                        "pmo": pmo_id,
+                        "status": status_db,
+                        "fecha": date_new,
+                        "glosa": glosa_new.strip() or None,
+                    })
+                st.success("Pago registrado.")
+                st.rerun()
+
+        if payments:
+            st.markdown("**Actualizar pagos estimados**")
+            for r in payments:
+                if (r.get("status") or "").lower() != "estimado":
+                    continue
+                pid = r.get("id")
+                with st.form(f"edit_payment_{pid}"):
+                    st.write(f"Pago estimado #{pid}")
+                    current_date = r.get("payment_date")
+                    new_date = st.date_input("Nueva fecha", value=current_date, key=f"date_{pid}")
+                    glosa_edit = st.text_area("Glosa", value=r.get("glosa") or "", height=60, key=f"glosa_{pid}")
+                    save = st.form_submit_button("Actualizar estimado")
+                    if save:
+                        with engine.begin() as conn:
+                            if current_date != new_date:
+                                conn.execute(text("""
+                                    INSERT INTO payment_estimate_history (payment_id, old_date, new_date)
+                                    VALUES (:pid, :old, :new)
+                                """), {"pid": pid, "old": current_date, "new": new_date})
+                            conn.execute(text("""
+                                UPDATE payments
+                                SET payment_date = :fecha, glosa = :glosa, updated_at = NOW()
+                                WHERE id = :pid
+                            """), {"pid": pid, "fecha": new_date, "glosa": glosa_edit.strip() or None})
+                        st.success("Pago estimado actualizado.")
+                        st.rerun()
             st.caption(f"Total presupuestado: {total_budget:,.2f}")
         else:
             st.info("No hay monto presupuestado para calcular porcentajes por estado.")

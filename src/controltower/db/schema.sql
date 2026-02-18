@@ -121,6 +121,29 @@ CREATE TABLE IF NOT EXISTS projects_history (
     snapshot_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS payments (
+    id SERIAL PRIMARY KEY,
+    project_gid VARCHAR(50),
+    pmo_id VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL, -- estimado | efectuado
+    payment_date DATE NOT NULL,
+    glosa TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS payment_estimate_history (
+    id SERIAL PRIMARY KEY,
+    payment_id INTEGER NOT NULL,
+    old_date DATE,
+    new_date DATE,
+    changed_at TIMESTAMP DEFAULT NOW(),
+    FOREIGN KEY (payment_id) REFERENCES payments(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_pmo_id ON payments(pmo_id);
+CREATE INDEX IF NOT EXISTS idx_payments_project ON payments(project_gid);
+
 CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status);
 CREATE INDEX IF NOT EXISTS idx_findings_created ON findings(created_at);
 CREATE INDEX IF NOT EXISTS idx_changelog_project ON project_changelog(project_gid);

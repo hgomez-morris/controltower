@@ -2,10 +2,11 @@ asana==5.2.2
 python-dotenv==1.0.1
 PyYAML==6.0.2
 SQLAlchemy==2.0.30
-psycopg[binary]==3.2.6
+psycopg[binary]==3.2.13
 pandas==2.2.2
 requests==2.32.3
 tenacity==8.5.0
 streamlit==1.37.1
 openpyxl==3.1.5
 pytest==8.3.3
+streamlit-plotly-events==0.0.6
