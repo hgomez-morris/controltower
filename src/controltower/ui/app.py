@@ -13,36 +13,103 @@ from controltower.ui.ui_pages import (
     proyectos,
     seguimiento,
 )
+from controltower.ui.lib.sidebar import apply_sidebar_style, render_sidebar_footer
 
 
 def main():
     st.set_page_config(page_title="PMO Control Tower (MVP)", layout="wide")
+    apply_sidebar_style()
 
-    pages = {
+    groups = {
         "Asana": [
-            st.Page(dashboard.render, title="Dashboard", url_path="dashboard"),
-            st.Page(proyectos.render, title="Proyectos", url_path="proyectos"),
-            st.Page(findings.render, title="Findings", url_path="findings"),
-            st.Page(mensajes.render, title="Mensajes", url_path="mensajes"),
-            st.Page(seguimiento.render, title="Seguimiento", url_path="seguimiento"),
+            ("Dashboard", dashboard.render),
+            ("Proyectos", proyectos.render),
+            ("Findings", findings.render),
+            ("Mensajes", mensajes.render),
+            ("Seguimiento", seguimiento.render),
         ],
         "General": [
-            st.Page(kpi.render, title="KPI", url_path="kpi"),
-            st.Page(busqueda.render, title="Búsqueda", url_path="busqueda"),
-            st.Page(plan_facturacion.render, title="Facturación", url_path="plan-facturacion"),
-            st.Page(pagos.render, title="Pagos", url_path="pagos"),
+            ("KPI", kpi.render),
+            ("Búsqueda", busqueda.render),
+            ("Facturación", plan_facturacion.render),
+            ("Pagos", pagos.render),
         ],
         "Clockify": [
-            st.Page(clockify_por_usuario.render, title="Por Usuario", url_path="clockify-por-usuario"),
-            st.Page(clockify_por_proyectos.render, title="Por Proyectos", url_path="clockify-por-proyectos"),
+            ("Por Usuario", clockify_por_usuario.render),
+            ("Por Proyectos", clockify_por_proyectos.render),
         ],
     }
 
-    try:
-        navigator = st.navigation(pages, expanded=True)
-    except TypeError:
-        navigator = st.navigation(pages)
-    navigator.run()
+    def _set_nav_selected(group_key, other_keys):
+        st.session_state["nav_selected"] = st.session_state.get(group_key)
+        st.session_state["nav_group"] = group_key
+        for k in other_keys:
+            st.session_state[k] = None
+
+    if "nav_selected" not in st.session_state:
+        st.session_state["nav_selected"] = groups["Asana"][0][0]
+        st.session_state["nav_group"] = "nav_asana"
+
+    with st.sidebar:
+        st.markdown("**Asana**")
+        asana_options = [t for t, _ in groups["Asana"]]
+        asana_index = (
+            asana_options.index(st.session_state["nav_selected"])
+            if st.session_state.get("nav_group") == "nav_asana"
+            else 0
+        )
+        asana_choice = st.radio(
+            "Asana",
+            asana_options,
+            label_visibility="collapsed",
+            key="nav_asana",
+            index=asana_index,
+            on_change=_set_nav_selected,
+            args=("nav_asana", ["nav_general", "nav_clockify"]),
+        )
+        st.markdown("**General**")
+        general_options = [t for t, _ in groups["General"]]
+        general_index = (
+            general_options.index(st.session_state["nav_selected"])
+            if st.session_state.get("nav_group") == "nav_general"
+            else None
+        )
+        general_choice = st.radio(
+            "General",
+            general_options,
+            label_visibility="collapsed",
+            key="nav_general",
+            index=general_index,
+            on_change=_set_nav_selected,
+            args=("nav_general", ["nav_asana", "nav_clockify"]),
+        )
+        st.markdown("**Clockify**")
+        clockify_options = [t for t, _ in groups["Clockify"]]
+        clockify_index = (
+            clockify_options.index(st.session_state["nav_selected"])
+            if st.session_state.get("nav_group") == "nav_clockify"
+            else None
+        )
+        clockify_choice = st.radio(
+            "Clockify",
+            clockify_options,
+            label_visibility="collapsed",
+            key="nav_clockify",
+            index=clockify_index,
+            on_change=_set_nav_selected,
+            args=("nav_clockify", ["nav_asana", "nav_general"]),
+        )
+        render_sidebar_footer()
+
+    # Resolve selected page from session state
+    selected_title = st.session_state.get("nav_selected")
+    selected_group_key = st.session_state.get("nav_group", "nav_asana")
+    group_name = "Asana" if selected_group_key == "nav_asana" else "General" if selected_group_key == "nav_general" else "Clockify"
+
+    for title, fn in groups[group_name]:
+        if title == selected_title:
+            fn()
+            break
 
 
 if __name__ == "__main__":
