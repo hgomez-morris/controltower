@@ -40,6 +40,7 @@ from controltower.ui.lib.common import (
 )
 from controltower.ui.lib.context import CHILE_TZ, get_cfg, get_engine_cached
 from controltower.ui.lib.db_admin import _ensure_kpi_tables, _ensure_payments_tables
+from controltower.ui.lib.queries import base_projects_params, base_projects_where
 
 
 def render():
@@ -112,167 +113,46 @@ def render():
     sponsor_query = fcols[0].selectbox("Sponsor", sponsor_values, index=0)
     bv_query = fcols[1].selectbox("Business Vertical", bv_values, index=0)
 
+    sponsor_value = "" if sponsor_query == "(todos)" else sponsor_query.strip()
+    bv_value = "" if bv_query == "(todos)" else bv_query.strip()
+    base_params = base_projects_params(sponsor_value, bv_value)
+    base_where = " AND ".join(
+        base_projects_where(table_alias="p", sponsor_filter=sponsor_value, bv_filter=bv_value)
+    )
+
     if "dashboard_pie_selection" not in st.session_state:
         st.session_state["dashboard_pie_selection"] = None
     with engine.begin() as conn:
-        counts = conn.execute(text("""
+        counts = conn.execute(text(f"""
             SELECT
               SUM(CASE WHEN f.status IN ('open','acknowledged') THEN 1 ELSE 0 END) AS open_findings,
               SUM(CASE WHEN f.severity='high' AND f.status IN ('open','acknowledged') THEN 1 ELSE 0 END) AS high_open
             FROM findings f
             JOIN projects p ON p.gid = f.project_gid
-            WHERE EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
-            )
-            AND EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-              WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                AND (
-                  (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                  OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                  OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                )
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-              WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-            )
-            AND COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'
-            AND (:sponsor = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-              WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-            ))
-            AND (:bv = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
-              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
-                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
-            ))
-        """), {
-            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
-            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
-            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
-        }).mappings().one()
-        by_rule = conn.execute(text("""
+            WHERE f.status IN ('open','acknowledged') AND {base_where}
+        """), base_params).mappings().one()
+        by_rule = conn.execute(text(f"""
             SELECT f.rule_id, COUNT(*) AS n
             FROM findings f
             JOIN projects p ON p.gid = f.project_gid
-            WHERE f.status IN ('open','acknowledged') AND EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
-            )
-            AND EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-              WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                AND (
-                  (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                  OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                  OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                )
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-              WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-            )
-            AND COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'
-            AND (:sponsor = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-              WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-            ))
-            AND (:bv = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
-              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
-                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
-            ))
+            WHERE f.status IN ('open','acknowledged') AND {base_where}
             GROUP BY f.rule_id
             ORDER BY n DESC
-        """), {
-            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
-            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
-            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
-        }).mappings().all()
+        """), base_params).mappings().all()
 
-        by_project_status = conn.execute(text("""
+        by_project_status = conn.execute(text(f"""
             SELECT COALESCE(p.status,'(sin status)') AS project_status, COUNT(*) AS n
             FROM projects p
-            WHERE EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
-            )
-            AND EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-              WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                AND (
-                  (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                  OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                  OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                )
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-              WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-            )
-            AND COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'
-            AND (:sponsor = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-              WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-            ))
-            AND (:bv = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
-              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
-                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
-            ))
+            WHERE {base_where}
             GROUP BY project_status
             ORDER BY n DESC
-        """), {
-            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
-            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
-            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
-        }).mappings().all()
+        """), base_params).mappings().all()
     with engine.begin() as conn:
-        total_projects = conn.execute(text("""
+        total_projects = conn.execute(text(f"""
             SELECT COUNT(*) AS n
             FROM projects p
-            WHERE EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-              WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
-            )
-            AND EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-              WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                AND (
-                  (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                  OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                  OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                )
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-              WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-            )
-            AND COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'
-            AND (:sponsor = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-              WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-            ))
-            AND (:bv = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
-              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
-                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
-            ))
-        """), {
-            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
-            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
-            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
-        }).mappings().one()
+            WHERE {base_where}
+        """), base_params).mappings().one()
 
     c1, c2 = st.columns(2)
     c1.metric("Hallazgos abiertos", counts["open_findings"] or 0)
@@ -306,40 +186,18 @@ def render():
             rule_c: "Pocas tareas (<=3)",
         }
         with engine.begin() as conn:
-            venn_rows = conn.execute(text("""
+            venn_rows = conn.execute(text(f"""
                 SELECT f.project_gid, f.rule_id
                 FROM findings f
                 JOIN projects p ON p.gid = f.project_gid
                 WHERE f.status IN ('open','acknowledged')
                   AND f.rule_id IN (:r1, :r2, :r3)
-                  AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                    WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
-                  )
-                  AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-                    WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                      AND (
-                        (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                        OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                        OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                      )
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-                    WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                      AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-                  )
-                  AND (:sponsor = '' OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-                    WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-                  ))
+                  AND {base_where}
             """), {
                 "r1": rule_a,
                 "r2": rule_b,
                 "r3": rule_c,
-                "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-                "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
+                **base_params,
             }).mappings().all()
 
         sets = {rule_a: set(), rule_b: set(), rule_c: set()}
@@ -394,47 +252,15 @@ def render():
             st.plotly_chart(fig, use_container_width=True)
 
     with engine.begin() as conn:
-        by_responsable = conn.execute(text("""
+        by_responsable = conn.execute(text(f"""
             SELECT COALESCE(cf->>'display_value','(sin responsable)') AS responsable, COUNT(*) AS n
             FROM projects p
             LEFT JOIN LATERAL jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
               ON cf->>'name' = 'Responsable Proyecto'
-            WHERE EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf2
-              WHERE cf2->>'name' = 'PMO ID' AND COALESCE(cf2->>'display_value','') <> ''
-            )
-            AND EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-              WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                AND (
-                  (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                  OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                  OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                )
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-              WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-            )
-            AND COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'
-            AND (:sponsor = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-              WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-            ))
-            AND (:bv = '' OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
-              WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
-                AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
-            ))
+            WHERE {base_where}
             GROUP BY responsable
             ORDER BY n DESC
-        """), {
-            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
-            "bv": "" if bv_query == "(todos)" else bv_query.strip(),
-            "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
-        }).mappings().all()
+        """), base_params).mappings().all()
 
     pie_cols = st.columns(2)
     with pie_cols[0]:
@@ -461,12 +287,18 @@ def render():
                 "-": "#9e9e9e",
                 "(Sin Status)": "#9e9e9e",
             }
-            fig_status = px.pie(
-                df_status,
-                values="Cantidad",
-                names="project_status_label",
-                color="project_status_label",
-                color_discrete_map=status_colors,
+            import plotly.graph_objects as go
+            fig_status = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=df_status["project_status_label"].tolist(),
+                        values=df_status["Cantidad"].astype(float).tolist(),
+                        marker=dict(
+                            colors=[status_colors.get(l, "#9e9e9e") for l in df_status["project_status_label"]]
+                        ),
+                        sort=False,
+                    )
+                ]
             )
             selected = plotly_events(
                 fig_status,
@@ -495,7 +327,16 @@ def render():
         if by_responsable:
             df_resp = pd.DataFrame(by_responsable).rename(columns={"n": "Cantidad"})
             df_resp["Cantidad"] = pd.to_numeric(df_resp["Cantidad"], errors="coerce").fillna(0).astype(float)
-            fig_resp = px.pie(df_resp, values="Cantidad", names="responsable")
+            import plotly.graph_objects as go
+            fig_resp = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=df_resp["responsable"].tolist(),
+                        values=df_resp["Cantidad"].astype(float).tolist(),
+                        sort=False,
+                    )
+                ]
+            )
             selected = plotly_events(
                 fig_resp,
                 click_event=True,
@@ -523,47 +364,10 @@ def render():
         st.markdown("**Proyectos del segmento seleccionado**")
         with engine.begin() as conn:
             where = []
-            params = {
-                "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-                "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
-                "bv": "" if bv_query == "(todos)" else bv_query.strip(),
-                "bv_like": f"%{'' if bv_query == '(todos)' else bv_query.strip()}%",
-            }
-            where.append("""
-                EXISTS (
-                  SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                  WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
-                )
-            """)
-            where.append("""
-                EXISTS (
-                  SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-                  WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                    AND (
-                      (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                      OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                      OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                    )
-                )
-            """)
-            where.append("""
-                NOT EXISTS (
-                  SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-                  WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                    AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%'
-                      OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-                )
-            """)
-            where.append("COALESCE(p.raw_data->'project'->>'completed','false') <> 'true'")
-            where.append("""(:sponsor = '' OR EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-                WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-            ))""")
-            where.append("""(:bv = '' OR EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv2
-                WHERE (cf_bv2->>'gid' = '1209701308000267' OR cf_bv2->>'name' = 'Business Vertical')
-                  AND COALESCE(cf_bv2->>'display_value', cf_bv2->'enum_value'->>'name','') ILIKE :bv_like
-            ))""")
+            params = dict(base_params)
+            where.extend(
+                base_projects_where(table_alias="p", sponsor_filter=sponsor_value, bv_filter=bv_value)
+            )
 
             if sel.get("type") == "status":
                 raw_statuses = sel.get("raw_statuses") or []
@@ -619,7 +423,7 @@ def render():
 
     st.markdown("**Proyectos por semana de cierre (futuro)**")
     with engine.begin() as conn:
-        closing_dates = conn.execute(text("""
+        closing_dates = conn.execute(text(f"""
             SELECT
               COALESCE(
                 (cf_end->'date_value'->>'date')::date,
@@ -634,32 +438,8 @@ def render():
                      (cf_end->'date_value'->>'date')::date,
                      (cf_end->>'display_value')::date
                   ) IS NOT NULL
-              AND EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-                WHERE cf->>'name' = 'PMO ID' AND COALESCE(cf->>'display_value','') <> ''
-              )
-              AND EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-                WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                  AND (
-                    (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                    OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                    OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                  )
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-                WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                  AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-              )
-              AND (:sponsor = '' OR EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-                WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-              ))
-        """), {
-            "sponsor": "" if sponsor_query == "(todos)" else sponsor_query.strip(),
-            "sponsor_like": f"%{'' if sponsor_query == '(todos)' else sponsor_query.strip()}%",
-        }).mappings().all()
+              AND {base_where}
+        """), base_params).mappings().all()
 
     if closing_dates:
         today = date.today()
@@ -748,4 +528,3 @@ def render():
             st.plotly_chart(fig_budget, use_container_width=True)
         else:
             st.info("No hay montos en 'Total presupuestado' para mostrar.")
-

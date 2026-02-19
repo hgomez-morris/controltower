@@ -38,8 +38,10 @@ from controltower.ui.lib.common import (
     _get_query_params,
     _truncate_text,
 )
+from controltower.ui.lib.feedback import show_error
 from controltower.ui.lib.context import CHILE_TZ, get_cfg, get_engine_cached
 from controltower.ui.lib.db_admin import _ensure_kpi_tables, _ensure_payments_tables
+from controltower.ui.lib.queries import base_projects_params, base_projects_where
 
 
 def render():
@@ -51,10 +53,14 @@ def render():
     st.caption("Compila un solo mensaje por responsable, con proyectos y reglas transgredidas (sin schedule_risk).")
 
     sponsor_filter = st.text_input("Sponsor contiene", value="")
+    base_params = base_projects_params(sponsor_filter, None)
+    base_where = " AND ".join(
+        base_projects_where(table_alias="p", sponsor_filter=sponsor_filter, bv_filter=None)
+    )
 
     # Load responsables list
     with engine.begin() as conn:
-        responsables = conn.execute(text("""
+        responsables = conn.execute(text(f"""
             SELECT DISTINCT TRIM(COALESCE(cf->>'display_value','')) AS responsable
             FROM projects p
             JOIN findings f ON f.project_gid = p.gid
@@ -63,33 +69,9 @@ def render():
             WHERE TRIM(COALESCE(cf->>'display_value','')) <> ''
               AND f.status IN ('open','acknowledged')
               AND f.rule_id <> 'schedule_risk'
-              AND EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_pmo
-                WHERE cf_pmo->>'name' = 'PMO ID' AND COALESCE(cf_pmo->>'display_value','') <> ''
-              )
-              AND EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-                WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                  AND (
-                    (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                    OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                    OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                  )
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-                WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                  AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-              )
-              AND (:sponsor = '' OR EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-                WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-              ))
+              AND {base_where}
             ORDER BY responsable
-        """), {
-            "sponsor": sponsor_filter.strip(),
-            "sponsor_like": f"%{sponsor_filter.strip()}%",
-        }).mappings().all()
+        """), base_params).mappings().all()
     responsables_list = [r["responsable"] for r in responsables] if responsables else []
     resp = st.selectbox("Responsable de proyecto", ["(selecciona)"] + responsables_list)
     email_default = _normalize_email_from_name(resp if resp != "(selecciona)" else "")
@@ -99,44 +81,22 @@ def render():
     msg_rows = []
     if resp and resp != "(selecciona)":
         with engine.begin() as conn:
-            rows = conn.execute(text("""
+            rows = conn.execute(text(f"""
                 SELECT f.rule_id, f.details, p.gid, p.name, p.raw_data
                 FROM findings f
                 JOIN projects p ON p.gid = f.project_gid
                 WHERE f.status IN ('open','acknowledged')
                   AND f.rule_id <> 'schedule_risk'
-                  AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_pmo
-                    WHERE cf_pmo->>'name' = 'PMO ID' AND COALESCE(cf_pmo->>'display_value','') <> ''
-                  )
-                  AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_bv
-                    WHERE (cf_bv->>'gid' = '1209701308000267' OR cf_bv->>'name' = 'Business Vertical')
-                      AND (
-                        (cf_bv->'enum_value'->>'gid') = '1209701308000273'
-                        OR (cf_bv->'enum_value'->>'name') = 'Professional Services'
-                        OR COALESCE(cf_bv->>'display_value','') = 'Professional Services'
-                      )
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_phase
-                    WHERE (cf_phase->>'gid' = '1207505889399747' OR cf_phase->>'name' = 'Fase del proyecto')
-                      AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
-                  )
+                  AND {base_where}
                   AND EXISTS (
                     SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_resp
                     WHERE cf_resp->>'name' = 'Responsable Proyecto'
                       AND COALESCE(cf_resp->>'display_value','') ILIKE :resp
                   )
-                  AND (:sponsor = '' OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf_s
-                    WHERE cf_s->>'name' = 'Sponsor' AND COALESCE(cf_s->>'display_value','') ILIKE :sponsor_like
-                  ))
                 ORDER BY p.name ASC
             """), {
                 "resp": f"%{resp}%",
-                "sponsor": sponsor_filter.strip(),
-                "sponsor_like": f"%{sponsor_filter.strip()}%",
+                **base_params,
             }).mappings().all()
 
         grouped = {}
@@ -241,5 +201,4 @@ def render():
                     post_slack_message(cfg, msg, blocks=blocks)
                 st.success("Mensaje enviado.")
             except Exception as e:
-                st.error(f"Error enviando a Slack: {e}")
-
+                show_error("Error enviando a Slack.", str(e))

@@ -220,6 +220,26 @@ def _truncate_text(s: str, n: int = 10) -> str:
     return s[:n] + "..." if len(s) > n else s
 
 
+def _selected_row_index(selection):
+    if selection is None:
+        return None
+    rows = []
+    if hasattr(selection, "selection") and hasattr(selection.selection, "rows"):
+        rows = list(selection.selection.rows)
+    elif isinstance(selection, dict):
+        rows = list(selection.get("selection", {}).get("rows", []))
+    if not rows:
+        return None
+    try:
+        return int(rows[0])
+    except Exception:
+        return None
+
+
+def _table_height(row_count: int, min_height: int = 120, max_height: int = 700, row_px: int = 35, header_px: int = 40) -> int:
+    return max(min_height, min(max_height, header_px + row_count * row_px))
+
+
 def format_datetime_chile(value) -> str:
     if not value:
         return ""

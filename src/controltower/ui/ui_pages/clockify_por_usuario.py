@@ -18,6 +18,8 @@ from controltower.clockify.page_user_logic import (
     selected_person_from_index,
 )
 from controltower.clockify.ui_helpers import percent_cell_style, render_sidebar_brand
+from controltower.ui.lib.common import _selected_row_index, _table_height
+from controltower.ui.lib.feedback import show_error
 
 
 def detail_total_row_style(row):
@@ -60,7 +62,7 @@ def render():
         rows = person_percent_rows(df_hours, week_starts, weekly_hours)
         kpis = fetch_kpis(conn)
     except Exception as exc:
-        st.error(f"Error consultando PostgreSQL: {exc}")
+        show_error("Error consultando PostgreSQL.", str(exc))
         st.stop()
     finally:
         conn.close()
@@ -99,16 +101,9 @@ def render():
         key="user_weekly_grid",
     )
 
-    selected_rows = []
-    if selection is not None:
-        if hasattr(selection, "selection") and hasattr(selection.selection, "rows"):
-            selected_rows = list(selection.selection.rows)
-        elif isinstance(selection, dict):
-            selected_rows = list(selection.get("selection", {}).get("rows", []))
-    if not selected_rows:
+    selected_idx = _selected_row_index(selection)
+    if selected_idx is None:
         return
-
-    selected_idx = int(selected_rows[0])
     if selected_idx < 0 or selected_idx >= len(df):
         return
     selected_person = selected_person_from_index(df_raw, df, selected_idx)
@@ -117,7 +112,7 @@ def render():
     try:
         df_user_project_hours = fetch_weekly_hours_by_person_project(conn, week_starts, selected_person)
     except Exception as exc:
-        st.error(f"Error consultando detalle por proyecto: {exc}")
+        show_error("Error consultando detalle por proyecto.", str(exc))
         return
     finally:
         conn.close()
@@ -131,10 +126,7 @@ def render():
     detail_styled_df = detail_df.style.format(
         {"Total período": "{:.2f}", **{week: "{:.2f}" for week in week_starts}}
     ).apply(detail_total_row_style, axis=1)
-    row_count = len(detail_df)
-    row_px = 35
-    header_px = 40
-    table_height = max(120, min(700, header_px + row_count * row_px))
+    table_height = _table_height(len(detail_df))
     st.dataframe(
         detail_styled_df,
         use_container_width=True,

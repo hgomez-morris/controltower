@@ -38,8 +38,10 @@ from controltower.ui.lib.common import (
     _get_query_params,
     _truncate_text,
 )
+from controltower.ui.lib.feedback import show_error
 from controltower.ui.lib.context import CHILE_TZ, get_cfg, get_engine_cached
 from controltower.ui.lib.db_admin import _ensure_kpi_tables, _ensure_payments_tables
+from controltower.ui.lib.queries import base_projects_params, base_projects_where
 
 
 def render():
@@ -53,7 +55,7 @@ def render():
             sent = post_new_findings_to_slack(cfg)
             st.success(f"Mensajes enviados: {sent}")
         except Exception as e:
-            st.error(f"Error enviando a Slack: {e}")
+            show_error("Error enviando a Slack.", str(e))
 
     # Build rule list dynamically from config
     rule_ids = ["(todas)"]
@@ -75,6 +77,9 @@ def render():
 
     where = ["1=1"]
     params = {}
+    base_params = base_projects_params(sponsor_query, None)
+    where.extend(base_projects_where(table_alias="p", sponsor_filter=sponsor_query, bv_filter=None))
+    params.update(base_params)
 
     if rule_filter != "(todas)":
         where.append("rule_id = :rule_id")
@@ -116,14 +121,6 @@ def render():
             AND (lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%terminad%' OR lower(COALESCE(cf_phase->>'display_value', cf_phase->'enum_value'->>'name','')) LIKE '%cancelad%')
         )
     """)
-    if sponsor_query.strip():
-        where.append("""
-            EXISTS (
-              SELECT 1 FROM jsonb_array_elements(p.raw_data->'project'->'custom_fields') cf
-              WHERE cf->>'name' = 'Sponsor' AND COALESCE(cf->>'display_value','') ILIKE :sponsor
-            )
-        """)
-        params["sponsor"] = f"%{sponsor_query.strip()}%"
     if project_status_filter != "(todos)":
         if project_status_filter == "none":
             where.append("p.status IS NULL")
@@ -261,7 +258,7 @@ def render():
                 sent = post_findings_to_slack_by_ids(cfg, selected_ids)
                 st.success(f"Mensajes enviados: {sent}")
             except Exception as e:
-                st.error(f"Error enviando a Slack: {e}")
+                show_error("Error enviando a Slack.", str(e))
 
     if action_cols[2].button("Exportar seleccionados (CSV)"):
         if not selected_ids:
@@ -394,7 +391,7 @@ def render():
     if st.button("Acknowledge seleccionados"):
         ids = [int(x.strip()) for x in ack_ids.split(",") if x.strip().isdigit()]
         if not ids or not ack.strip():
-            st.error("IDs y comentario son obligatorios.")
+            show_error("IDs y comentario son obligatorios.")
         else:
             with engine.begin() as conn:
                 conn.execute(text("""
@@ -407,4 +404,3 @@ def render():
                 """), {"ids": ids, "c": ack, "by": ack_by or "PMO"})
             st.success("Hallazgos acknowledged.")
             st.rerun()
-
