@@ -39,11 +39,8 @@ from controltower.ui.lib.common import (
 )
 from controltower.ui.lib.context import CHILE_TZ, get_cfg, get_engine_cached
 from controltower.ui.lib.db_admin import _ensure_kpi_tables, _ensure_payments_tables
-from controltower.ui.lib.sidebar import apply_sidebar_style, render_sidebar_footer
 
 def render():
-    apply_sidebar_style()
-    render_sidebar_footer()
     st.title("PMO Control Tower - MVP")
     engine = get_engine_cached()
     cfg = get_cfg()

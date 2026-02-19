@@ -15,12 +15,32 @@ CREATE TABLE IF NOT EXISTS projects (
     tasks_created_last_7d INTEGER,
     tasks_completed_last_7d INTEGER,
     tasks_modified_last_7d INTEGER,
+    pmo_id VARCHAR(100),
+    sponsor VARCHAR(200),
+    responsable_proyecto VARCHAR(200),
+    business_vertical VARCHAR(200),
+    fase_proyecto VARCHAR(200),
+    en_plan_facturacion BOOLEAN,
+    completed_flag BOOLEAN,
     raw_data JSONB,
     synced_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS tasks_modified_last_7d INTEGER;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS pmo_id VARCHAR(100);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS sponsor VARCHAR(200);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS responsable_proyecto VARCHAR(200);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS business_vertical VARCHAR(200);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS fase_proyecto VARCHAR(200);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS en_plan_facturacion BOOLEAN;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS completed_flag BOOLEAN;
+
+CREATE INDEX IF NOT EXISTS idx_projects_pmo_id ON projects(pmo_id);
+CREATE INDEX IF NOT EXISTS idx_projects_sponsor ON projects(sponsor);
+CREATE INDEX IF NOT EXISTS idx_projects_business_vertical ON projects(business_vertical);
+CREATE INDEX IF NOT EXISTS idx_projects_fase ON projects(fase_proyecto);
+CREATE INDEX IF NOT EXISTS idx_projects_en_plan_facturacion ON projects(en_plan_facturacion);
 
 CREATE TABLE IF NOT EXISTS project_changelog (
     id SERIAL PRIMARY KEY,

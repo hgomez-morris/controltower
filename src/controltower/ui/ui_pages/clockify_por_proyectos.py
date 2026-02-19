@@ -1,14 +1,12 @@
 ﻿import pandas as pd
 import streamlit as st
 
-from controltower.ui.lib.sidebar import apply_sidebar_style, render_sidebar_footer
 
 
 from controltower.clockify.analytics_db import (
     extract_pmo_id,
     fetch_asana_hours_by_pmo_ids,
     fetch_kpis,
-    fetch_last_sync,
     fetch_time_entries_count_for_weeks,
     fetch_total_hours_by_project_person,
     fetch_total_hours_by_project,
@@ -24,7 +22,7 @@ from controltower.clockify.page_project_logic import (
     enrich_project_rows,
     is_closed_project,
 )
-from controltower.clockify.ui_helpers import render_last_sync_sidebar, render_sidebar_brand
+from controltower.clockify.ui_helpers import render_sidebar_brand
 
 
 def trend_cell_style(value):
@@ -62,8 +60,6 @@ def detail_total_row_style(row):
 
 
 def render():
-    apply_sidebar_style()
-    render_sidebar_footer()
     st.title("Clockify - Por proyectos")
     render_sidebar_brand()
 
@@ -91,7 +87,6 @@ def render():
 
     conn = get_conn()
     try:
-        last_sync = fetch_last_sync(conn)
         week_starts = fetch_week_starts(conn, weeks_count, include_current_week=include_current_week)
         df_hours = fetch_weekly_hours_by_project(conn, week_starts)
         period_time_entries = fetch_time_entries_count_for_weeks(conn, week_starts)
@@ -103,8 +98,6 @@ def render():
         st.stop()
     finally:
         conn.close()
-
-    render_last_sync_sidebar(last_sync)
 
     if not week_starts:
         st.warning("No hay semanas en calendar_weeks. Ejecuta una sincronización primero.")

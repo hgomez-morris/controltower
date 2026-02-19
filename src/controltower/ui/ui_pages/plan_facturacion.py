@@ -39,11 +39,8 @@ from controltower.ui.lib.common import (
 )
 from controltower.ui.lib.context import CHILE_TZ, get_cfg, get_engine_cached
 from controltower.ui.lib.db_admin import _ensure_kpi_tables, _ensure_payments_tables
-from controltower.ui.lib.sidebar import apply_sidebar_style, render_sidebar_footer
 
 def render():
-    apply_sidebar_style()
-    render_sidebar_footer()
     st.title("PMO Control Tower - MVP")
     engine = get_engine_cached()
     cfg = get_cfg()
@@ -84,11 +81,11 @@ def render():
 
     if rows:
         df = pd.DataFrame([{
-            "PMO-ID": _cf_value_from_project_row(p, "PMO ID"),
+            "PMO-ID": p.get("pmo_id") or _cf_value_from_project_row(p, "PMO ID"),
             "Proyecto": p.get("name") or "",
-            "Responsable": _cf_value_from_project_row(p, "Responsable Proyecto") or p.get("owner_name") or "",
-            "Sponsor": _cf_value_from_project_row(p, "Sponsor"),
-            "Fase del proyecto": _cf_value_from_project_row(p, "Fase del proyecto"),
+            "Responsable": p.get("responsable_proyecto") or _cf_value_from_project_row(p, "Responsable Proyecto") or p.get("owner_name") or "",
+            "Sponsor": p.get("sponsor") or _cf_value_from_project_row(p, "Sponsor"),
+            "Fase del proyecto": p.get("fase_proyecto") or _cf_value_from_project_row(p, "Fase del proyecto"),
             "Término estimado": _fmt_date(
                 _cf_first_value((p.get("raw_data") or {}).get("project") or {}, ["Fecha Planificada Termino del proyecto"])
                 or (p.get("raw_data") or {}).get("project", {}).get("due_date")

@@ -36,6 +36,51 @@ def _phase_is_terminated_or_cancelled(project: dict) -> bool:
                 return True
     return False
 
+
+def _cf_map(project: dict) -> dict:
+    fields = project.get("custom_fields") or []
+    out = {}
+    for f in fields:
+        name = f.get("name")
+        if not name:
+            continue
+        if f.get("display_value") is not None:
+            val = f.get("display_value")
+        else:
+            val = f.get("text_value") or f.get("number_value") or (f.get("enum_value") or {}).get("name")
+        out[name] = val
+    return out
+
+
+def _cf_value(project: dict, name: str) -> str:
+    cf = _cf_map(project)
+    val = cf.get(name, "")
+    return "" if val is None else str(val)
+
+
+def _cf_value_by_gid_or_name(project: dict, gid: str, name: str) -> str:
+    fields = project.get("custom_fields") or []
+    for f in fields:
+        if f.get("gid") == gid or f.get("name") == name:
+            val = f.get("display_value")
+            if val is None:
+                val = f.get("text_value") or f.get("number_value") or (f.get("enum_value") or {}).get("name")
+            return "" if val is None else str(val)
+    return ""
+
+
+def _cf_bool_like(project: dict, prefix: str) -> bool:
+    fields = project.get("custom_fields") or []
+    for f in fields:
+        name = str(f.get("name") or "")
+        if name.lower().startswith(prefix.lower()):
+            val = f.get("display_value")
+            if val is None:
+                val = f.get("text_value") or f.get("number_value") or (f.get("enum_value") or {}).get("name")
+            sval = str(val or "").strip().lower()
+            return sval in {"si", "sí", "yes", "true", "1"}
+    return False
+
 def _recently_closed_or_cancelled(project: dict, cutoff: datetime) -> bool:
     # Use completed_at or modified_at as proxy for closure timing
     ts = project.get("completed_at") or project.get("modified_at") or project.get("created_at")
@@ -124,11 +169,13 @@ def upsert_project(conn, project: dict) -> None:
         gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
         last_status_update_at, last_status_update_by, last_activity_at,
         total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d,
+        pmo_id, sponsor, responsable_proyecto, business_vertical, fase_proyecto, en_plan_facturacion, completed_flag,
         raw_data, synced_at
     ) VALUES (
         :gid, :name, :owner_gid, :owner_name, :due_date, :status, :calculated_progress,
         :last_status_update_at, :last_status_update_by, :last_activity_at,
         :total_tasks, :completed_tasks, :tasks_created_last_7d, :tasks_completed_last_7d, :tasks_modified_last_7d,
+        :pmo_id, :sponsor, :responsable_proyecto, :business_vertical, :fase_proyecto, :en_plan_facturacion, :completed_flag,
         CAST(:raw_data AS jsonb), :synced_at
     )
     ON CONFLICT (gid) DO UPDATE SET
@@ -146,6 +193,13 @@ def upsert_project(conn, project: dict) -> None:
         tasks_created_last_7d = EXCLUDED.tasks_created_last_7d,
         tasks_completed_last_7d = EXCLUDED.tasks_completed_last_7d,
         tasks_modified_last_7d = EXCLUDED.tasks_modified_last_7d,
+        pmo_id = EXCLUDED.pmo_id,
+        sponsor = EXCLUDED.sponsor,
+        responsable_proyecto = EXCLUDED.responsable_proyecto,
+        business_vertical = EXCLUDED.business_vertical,
+        fase_proyecto = EXCLUDED.fase_proyecto,
+        en_plan_facturacion = EXCLUDED.en_plan_facturacion,
+        completed_flag = EXCLUDED.completed_flag,
         raw_data = EXCLUDED.raw_data,
         synced_at = EXCLUDED.synced_at
     """)
@@ -277,6 +331,13 @@ def main_sync(config: dict) -> str:
                 "tasks_created_last_7d": metrics["tasks_created_last_7d"],
                 "tasks_completed_last_7d": metrics["tasks_completed_last_7d"],
                 "tasks_modified_last_7d": metrics["tasks_modified_last_7d"],
+                "pmo_id": _cf_value(pfull, "PMO ID"),
+                "sponsor": _cf_value(pfull, "Sponsor"),
+                "responsable_proyecto": _cf_value(pfull, "Responsable Proyecto"),
+                "business_vertical": _cf_value_by_gid_or_name(pfull, "1209701308000267", "Business Vertical"),
+                "fase_proyecto": _cf_value_by_gid_or_name(pfull, "1207505889399747", "Fase del proyecto"),
+                "en_plan_facturacion": _cf_bool_like(pfull, "En plan de fact"),
+                "completed_flag": pfull.get("completed") is True,
                 "raw_data": json.dumps({"project": pfull}),
                 "synced_at": _utcnow().isoformat(),
             }

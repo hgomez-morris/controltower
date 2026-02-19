@@ -2,6 +2,7 @@ import json
 import re
 import unicodedata
 from datetime import datetime, timezone, date
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -217,3 +218,23 @@ def _truncate_text(s: str, n: int = 10) -> str:
         return ""
     s = str(s)
     return s[:n] + "..." if len(s) > n else s
+
+
+def format_datetime_chile(value) -> str:
+    if not value:
+        return ""
+    try:
+        chile_tz = ZoneInfo("America/Santiago")
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(chile_tz).strftime("%Y-%m-%d %H:%M")
+        text = str(value)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(chile_tz).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(value)[:16]

@@ -5,7 +5,9 @@ import sys
 import time
 import threading
 import json
+import subprocess
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Ensure src is on path when running as script
@@ -29,6 +31,9 @@ from controltower.sync.sync_runner import (
     _detect_changes,
     _phase_is_terminated_or_cancelled,
     _recently_closed_or_cancelled,
+    _cf_value,
+    _cf_value_by_gid_or_name,
+    _cf_bool_like,
 )
 from controltower.utils.logging import configure_logging
 
@@ -198,6 +203,13 @@ def main() -> None:
                     "tasks_created_last_7d": metrics["tasks_created_last_7d"],
                     "tasks_completed_last_7d": metrics["tasks_completed_last_7d"],
                     "tasks_modified_last_7d": metrics["tasks_modified_last_7d"],
+                    "pmo_id": _cf_value(pfull, "PMO ID"),
+                    "sponsor": _cf_value(pfull, "Sponsor"),
+                    "responsable_proyecto": _cf_value(pfull, "Responsable Proyecto"),
+                    "business_vertical": _cf_value_by_gid_or_name(pfull, "1209701308000267", "Business Vertical"),
+                    "fase_proyecto": _cf_value_by_gid_or_name(pfull, "1207505889399747", "Fase del proyecto"),
+                    "en_plan_facturacion": _cf_bool_like(pfull, "En plan de fact"),
+                    "completed_flag": pfull.get("completed") is True,
                     "raw_data": json.dumps({"project": pfull}),
                     "synced_at": _utcnow().isoformat(),
                 }
@@ -260,6 +272,23 @@ def main() -> None:
         })
 
     created = evaluate_rules(cfg, sync_id)
+
+    # Clockify sync: 90 days only on the 09:00 (Chile) run; otherwise 7 days
+    chile_now = datetime.now(ZoneInfo("America/Santiago"))
+    morning = chile_now.hour == 9
+    incremental_days = 90 if morning else 7
+    try:
+        subprocess.run(
+            [sys.executable, os.path.join("scripts", "run_clockify_sync.py"), "--incremental-days", str(incremental_days)],
+            check=True,
+        )
+    except Exception as exc:
+        log.warning("[clockify] sync failed: %s", exc)
+
+    # Slack disabled for now. Should run after Clockify when re-enabled.
+    # if (cfg.get("slack", {}) or {}).get("enabled", False):
+    #     post_new_findings_to_slack(cfg)
+
     log.info("Parallel sync completed. sync_id=%s processed=%s forbidden=%s skipped=%s findings_created=%s",
              sync_id, processed, forbidden, skipped + skipped_unchanged, created)
 

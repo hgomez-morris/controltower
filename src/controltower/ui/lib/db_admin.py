@@ -30,6 +30,13 @@ def _ensure_kpi_tables() -> None:
             """
             )
         )
+        conn.execute(text("""ALTER TABLE projects ADD COLUMN IF NOT EXISTS pmo_id VARCHAR(100)"""))
+        conn.execute(text("""ALTER TABLE projects ADD COLUMN IF NOT EXISTS sponsor VARCHAR(200)"""))
+        conn.execute(text("""ALTER TABLE projects ADD COLUMN IF NOT EXISTS responsable_proyecto VARCHAR(200)"""))
+        conn.execute(text("""ALTER TABLE projects ADD COLUMN IF NOT EXISTS business_vertical VARCHAR(200)"""))
+        conn.execute(text("""ALTER TABLE projects ADD COLUMN IF NOT EXISTS fase_proyecto VARCHAR(200)"""))
+        conn.execute(text("""ALTER TABLE projects ADD COLUMN IF NOT EXISTS en_plan_facturacion BOOLEAN"""))
+        conn.execute(text("""ALTER TABLE projects ADD COLUMN IF NOT EXISTS completed_flag BOOLEAN"""))
 
 
 def _ensure_payments_tables() -> None:

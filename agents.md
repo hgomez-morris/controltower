@@ -121,6 +121,14 @@ Variables adicionales (Clockify):
 3) Ejecutar sync:
    - `python scripts/run_sync.py`
 
+### Aplicar schema (Docker) + backfill de campos
+Si PostgreSQL corre en Docker (service `postgres`), aplicar el schema desde el host:
+- `docker compose exec -T postgres psql -U controltower -d controltower < src/controltower/db/schema.sql`
+
+Luego ejecutar backfill de columnas derivadas:
+- `export PYTHONPATH="$(pwd)/src"`
+- `python scripts/backfill_project_fields.py`
+
 ### Sync Clockify (manual)
 - Script: `python scripts/run_clockify_sync.py`
 - Modos:

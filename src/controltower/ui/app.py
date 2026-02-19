@@ -46,18 +46,18 @@ def main():
         for k in other_keys:
             st.session_state[k] = None
 
-    if "nav_selected" not in st.session_state:
+    if "nav_selected" not in st.session_state or not st.session_state.get("nav_selected"):
         st.session_state["nav_selected"] = groups["Asana"][0][0]
         st.session_state["nav_group"] = "nav_asana"
 
     with st.sidebar:
         st.markdown("**Asana**")
         asana_options = [t for t, _ in groups["Asana"]]
-        asana_index = (
-            asana_options.index(st.session_state["nav_selected"])
-            if st.session_state.get("nav_group") == "nav_asana"
-            else 0
-        )
+        asana_selected = st.session_state.get("nav_selected")
+        if st.session_state.get("nav_group") != "nav_asana" or asana_selected not in asana_options:
+            asana_index = 0
+        else:
+            asana_index = asana_options.index(asana_selected)
         asana_choice = st.radio(
             "Asana",
             asana_options,
@@ -69,11 +69,11 @@ def main():
         )
         st.markdown("**General**")
         general_options = [t for t, _ in groups["General"]]
-        general_index = (
-            general_options.index(st.session_state["nav_selected"])
-            if st.session_state.get("nav_group") == "nav_general"
-            else None
-        )
+        general_selected = st.session_state.get("nav_selected")
+        if st.session_state.get("nav_group") != "nav_general" or general_selected not in general_options:
+            general_index = None
+        else:
+            general_index = general_options.index(general_selected)
         general_choice = st.radio(
             "General",
             general_options,
@@ -85,11 +85,11 @@ def main():
         )
         st.markdown("**Clockify**")
         clockify_options = [t for t, _ in groups["Clockify"]]
-        clockify_index = (
-            clockify_options.index(st.session_state["nav_selected"])
-            if st.session_state.get("nav_group") == "nav_clockify"
-            else None
-        )
+        clockify_selected = st.session_state.get("nav_selected")
+        if st.session_state.get("nav_group") != "nav_clockify" or clockify_selected not in clockify_options:
+            clockify_index = None
+        else:
+            clockify_index = clockify_options.index(clockify_selected)
         clockify_choice = st.radio(
             "Clockify",
             clockify_options,
@@ -110,6 +110,11 @@ def main():
         if title == selected_title:
             fn()
             break
+    else:
+        # fallback to Asana dashboard if selection is invalid
+        st.session_state["nav_group"] = "nav_asana"
+        st.session_state["nav_selected"] = groups["Asana"][0][0]
+        groups["Asana"][0][1]()
 
 
 if __name__ == "__main__":

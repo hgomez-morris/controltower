@@ -1,13 +1,11 @@
 ﻿import pandas as pd
 import streamlit as st
 
-from controltower.ui.lib.sidebar import apply_sidebar_style, render_sidebar_footer
 
 
 from controltower.clockify.analytics_db import (
     DEFAULT_WEEKLY_HOURS,
     fetch_kpis,
-    fetch_last_sync,
     fetch_week_starts,
     fetch_weekly_hours_by_person,
     fetch_weekly_hours_by_person_project,
@@ -19,7 +17,7 @@ from controltower.clockify.page_user_logic import (
     build_user_main_df,
     selected_person_from_index,
 )
-from controltower.clockify.ui_helpers import percent_cell_style, render_last_sync_sidebar, render_sidebar_brand
+from controltower.clockify.ui_helpers import percent_cell_style, render_sidebar_brand
 
 
 def detail_total_row_style(row):
@@ -29,8 +27,6 @@ def detail_total_row_style(row):
 
 
 def render():
-    apply_sidebar_style()
-    render_sidebar_footer()
     st.title("Clockify - Por usuarios")
     render_sidebar_brand()
 
@@ -59,7 +55,6 @@ def render():
 
     conn = get_conn()
     try:
-        last_sync = fetch_last_sync(conn)
         week_starts = fetch_week_starts(conn, weeks_count, include_current_week=include_current_week)
         df_hours = fetch_weekly_hours_by_person(conn, week_starts)
         rows = person_percent_rows(df_hours, week_starts, weekly_hours)
@@ -69,8 +64,6 @@ def render():
         st.stop()
     finally:
         conn.close()
-
-    render_last_sync_sidebar(last_sync)
 
     if not week_starts:
         st.warning("No hay semanas en calendar_weeks. Ejecuta una sincronización primero.")

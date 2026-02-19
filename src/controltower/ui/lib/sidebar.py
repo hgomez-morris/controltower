@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 import streamlit as st
 from sqlalchemy import text
 
-from controltower.ui.lib.context import CHILE_TZ, get_engine_cached
+from controltower.ui.lib.context import get_engine_cached
+from controltower.ui.lib.common import format_datetime_chile
 
 
 def apply_sidebar_style():
@@ -46,14 +47,29 @@ def _get_last_sync_label() -> str:
     if not row:
         return "Sync: sin registros"
     ts = row.get("completed_at") or row.get("started_at")
-    if isinstance(ts, datetime):
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        label = ts.astimezone(CHILE_TZ).strftime("%Y-%m-%d %H:%M")
-    else:
-        label = str(ts)[:16] if ts else ""
+    label = format_datetime_chile(ts) if ts else ""
     return f"Asana Sync: {label}"
+
+
+def _get_clockify_last_sync_label() -> str:
+    try:
+        from controltower.clockify.analytics_db import fetch_last_sync, get_conn
+
+        conn = get_conn()
+        try:
+            row = fetch_last_sync(conn)
+        finally:
+            conn.close()
+    except Exception:
+        row = {}
+
+    if not row:
+        return "Clockify Sync: sin registros"
+    ts = row.get("synced_at") or row.get("completed_at")
+    label = format_datetime_chile(ts) if ts else ""
+    return f"Clockify Sync: {label}"
 
 
 def render_sidebar_footer():
     st.sidebar.caption(_get_last_sync_label())
+    st.sidebar.caption(_get_clockify_last_sync_label())
