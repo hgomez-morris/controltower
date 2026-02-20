@@ -10,3 +10,5 @@ streamlit==1.37.1
 openpyxl==3.1.5
 pytest==8.3.3
 streamlit-plotly-events==0.0.6
+scikit-learn==1.5.2
+xgboost==2.1.3

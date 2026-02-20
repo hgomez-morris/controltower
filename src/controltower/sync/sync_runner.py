@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, uuid, json, logging, time
+import os, uuid, json, logging, time, re
 from datetime import datetime, timezone, timedelta
 from datetime import date as dt_date
 from decimal import Decimal
@@ -19,6 +19,9 @@ CRITICAL_FIELDS = [
     "tasks_created_last_7d",
     "tasks_completed_last_7d",
     "tasks_modified_last_7d",
+    "start_date",
+    "planned_hours_total",
+    "effective_hours_total",
     "calculated_progress",
     "last_activity_at",
 ]
@@ -68,6 +71,18 @@ def _cf_value_by_gid_or_name(project: dict, gid: str, name: str) -> str:
             return "" if val is None else str(val)
     return ""
 
+def _cf_value_any(project: dict, names: list[str]) -> str:
+    targets = {n.strip().lower() for n in names}
+    fields = project.get("custom_fields") or []
+    for f in fields:
+        name = str(f.get("name") or "").strip().lower()
+        if name in targets:
+            val = f.get("display_value")
+            if val is None:
+                val = f.get("text_value") or f.get("number_value") or (f.get("enum_value") or {}).get("name")
+            return "" if val is None else str(val)
+    return ""
+
 
 def _cf_bool_like(project: dict, prefix: str) -> bool:
     fields = project.get("custom_fields") or []
@@ -80,6 +95,44 @@ def _cf_bool_like(project: dict, prefix: str) -> bool:
             sval = str(val or "").strip().lower()
             return sval in {"si", "sí", "yes", "true", "1"}
     return False
+
+
+def _cf_number_like(project: dict, names: list[str], gids: list[str] | None = None) -> float | None:
+    fields = project.get("custom_fields") or []
+    name_set = {n.lower() for n in names}
+    gid_set = set(gids or [])
+    for f in fields:
+        name = str(f.get("name") or "")
+        if (gid_set and f.get("gid") in gid_set) or name.lower() in name_set:
+            val = f.get("display_value")
+            if val is None:
+                val = f.get("text_value") or f.get("number_value") or (f.get("enum_value") or {}).get("name")
+            if val is None:
+                return None
+            text = str(val).strip().replace(",", ".")
+            if not text:
+                return None
+            m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+            if not m:
+                return None
+            try:
+                return float(m.group(0))
+            except Exception:
+                return None
+    return None
+
+
+def _cf_date_by_name(project: dict, name: str, gid: str | None = None) -> str | None:
+    fields = project.get("custom_fields") or []
+    for f in fields:
+        if (gid and f.get("gid") == gid) or (f.get("name") == name):
+            date_val = None
+            if isinstance(f.get("date_value"), dict):
+                date_val = f.get("date_value", {}).get("date")
+            if not date_val:
+                date_val = f.get("display_value")
+            return date_val
+    return None
 
 def _recently_closed_or_cancelled(project: dict, cutoff: datetime) -> bool:
     # Use completed_at or modified_at as proxy for closure timing
@@ -169,13 +222,17 @@ def upsert_project(conn, project: dict) -> None:
         gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
         last_status_update_at, last_status_update_by, last_activity_at,
         total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d,
-        pmo_id, sponsor, responsable_proyecto, business_vertical, fase_proyecto, en_plan_facturacion, completed_flag,
+        start_date, planned_hours_total, effective_hours_total,
+        pmo_id, sponsor, cliente_nuevo, tipo_proyecto, clasificacion, segmento_empresa, pais,
+        responsable_proyecto, business_vertical, fase_proyecto, en_plan_facturacion, completed_flag,
         raw_data, synced_at
     ) VALUES (
         :gid, :name, :owner_gid, :owner_name, :due_date, :status, :calculated_progress,
         :last_status_update_at, :last_status_update_by, :last_activity_at,
         :total_tasks, :completed_tasks, :tasks_created_last_7d, :tasks_completed_last_7d, :tasks_modified_last_7d,
-        :pmo_id, :sponsor, :responsable_proyecto, :business_vertical, :fase_proyecto, :en_plan_facturacion, :completed_flag,
+        :start_date, :planned_hours_total, :effective_hours_total,
+        :pmo_id, :sponsor, :cliente_nuevo, :tipo_proyecto, :clasificacion, :segmento_empresa, :pais,
+        :responsable_proyecto, :business_vertical, :fase_proyecto, :en_plan_facturacion, :completed_flag,
         CAST(:raw_data AS jsonb), :synced_at
     )
     ON CONFLICT (gid) DO UPDATE SET
@@ -193,8 +250,16 @@ def upsert_project(conn, project: dict) -> None:
         tasks_created_last_7d = EXCLUDED.tasks_created_last_7d,
         tasks_completed_last_7d = EXCLUDED.tasks_completed_last_7d,
         tasks_modified_last_7d = EXCLUDED.tasks_modified_last_7d,
+        start_date = EXCLUDED.start_date,
+        planned_hours_total = EXCLUDED.planned_hours_total,
+        effective_hours_total = EXCLUDED.effective_hours_total,
         pmo_id = EXCLUDED.pmo_id,
         sponsor = EXCLUDED.sponsor,
+        cliente_nuevo = EXCLUDED.cliente_nuevo,
+        tipo_proyecto = EXCLUDED.tipo_proyecto,
+        clasificacion = EXCLUDED.clasificacion,
+        segmento_empresa = EXCLUDED.segmento_empresa,
+        pais = EXCLUDED.pais,
         responsable_proyecto = EXCLUDED.responsable_proyecto,
         business_vertical = EXCLUDED.business_vertical,
         fase_proyecto = EXCLUDED.fase_proyecto,
@@ -331,8 +396,28 @@ def main_sync(config: dict) -> str:
                 "tasks_created_last_7d": metrics["tasks_created_last_7d"],
                 "tasks_completed_last_7d": metrics["tasks_completed_last_7d"],
                 "tasks_modified_last_7d": metrics["tasks_modified_last_7d"],
+                "start_date": _cf_date_by_name(
+                    pfull,
+                    "Fecha Inicio del Proyecto",
+                    gid="1207505889399729",
+                ),
+                "planned_hours_total": _cf_number_like(
+                    pfull,
+                    ["Horas planificadas", "Horas Planificadas"],
+                    gids=["1207505889399760"],
+                ),
+                "effective_hours_total": _cf_number_like(
+                    pfull,
+                    ["Horas efectivas", "Horas efectivas "],
+                    gids=["1207505889399792"],
+                ),
                 "pmo_id": _cf_value(pfull, "PMO ID"),
                 "sponsor": _cf_value(pfull, "Sponsor"),
+                "cliente_nuevo": _cf_value_any(pfull, ["cliente_nuevo", "cliente nuevo"]),
+                "tipo_proyecto": _cf_value_any(pfull, ["tipo de proyecto", "tipo proyecto"]),
+                "clasificacion": _cf_value_any(pfull, ["clasificación", "clasificacion"]),
+                "segmento_empresa": _cf_value_any(pfull, ["segmento empresa", "segmento de empresa", "segmento"]),
+                "pais": _cf_value_any(pfull, ["país", "pais"]),
                 "responsable_proyecto": _cf_value(pfull, "Responsable Proyecto"),
                 "business_vertical": _cf_value_by_gid_or_name(pfull, "1209701308000267", "Business Vertical"),
                 "fase_proyecto": _cf_value_by_gid_or_name(pfull, "1207505889399747", "Fase del proyecto"),
@@ -344,7 +429,8 @@ def main_sync(config: dict) -> str:
             existing = conn.execute(text("""
                 SELECT gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
                        last_status_update_at, last_status_update_by, last_activity_at,
-                       total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d
+                       total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d,
+                       start_date, planned_hours_total, effective_hours_total
                 FROM projects WHERE gid=:gid
             """), {"gid": pgid}).mappings().first()
 

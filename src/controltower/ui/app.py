@@ -10,6 +10,7 @@ from controltower.ui.ui_pages import (
     mensajes,
     pagos,
     plan_facturacion,
+    prediccion_riesgo,
     proyectos,
     seguimiento,
 )
@@ -38,6 +39,9 @@ def main():
             ("Por Usuario", clockify_por_usuario.render),
             ("Por Proyectos", clockify_por_proyectos.render),
         ],
+        "Análisis": [
+            ("Predicción de Riesgo", prediccion_riesgo.render),
+        ],
     }
 
     def _set_nav_selected(group_key, other_keys):
@@ -65,7 +69,7 @@ def main():
             key="nav_asana",
             index=asana_index,
             on_change=_set_nav_selected,
-            args=("nav_asana", ["nav_general", "nav_clockify"]),
+            args=("nav_asana", ["nav_general", "nav_clockify", "nav_analysis"]),
         )
         st.markdown("**General**")
         general_options = [t for t, _ in groups["General"]]
@@ -81,7 +85,7 @@ def main():
             key="nav_general",
             index=general_index,
             on_change=_set_nav_selected,
-            args=("nav_general", ["nav_asana", "nav_clockify"]),
+            args=("nav_general", ["nav_asana", "nav_clockify", "nav_analysis"]),
         )
         st.markdown("**Clockify**")
         clockify_options = [t for t, _ in groups["Clockify"]]
@@ -97,14 +101,38 @@ def main():
             key="nav_clockify",
             index=clockify_index,
             on_change=_set_nav_selected,
-            args=("nav_clockify", ["nav_asana", "nav_general"]),
+            args=("nav_clockify", ["nav_asana", "nav_general", "nav_analysis"]),
+        )
+        st.markdown("**Análisis**")
+        analysis_options = [t for t, _ in groups["Análisis"]]
+        analysis_selected = st.session_state.get("nav_selected")
+        if st.session_state.get("nav_group") != "nav_analysis" or analysis_selected not in analysis_options:
+            analysis_index = None
+        else:
+            analysis_index = analysis_options.index(analysis_selected)
+        analysis_choice = st.radio(
+            "Análisis",
+            analysis_options,
+            label_visibility="collapsed",
+            key="nav_analysis",
+            index=analysis_index,
+            on_change=_set_nav_selected,
+            args=("nav_analysis", ["nav_asana", "nav_general", "nav_clockify"]),
         )
         render_sidebar_footer()
 
     # Resolve selected page from session state
     selected_title = st.session_state.get("nav_selected")
     selected_group_key = st.session_state.get("nav_group", "nav_asana")
-    group_name = "Asana" if selected_group_key == "nav_asana" else "General" if selected_group_key == "nav_general" else "Clockify"
+    group_name = (
+        "Asana"
+        if selected_group_key == "nav_asana"
+        else "General"
+        if selected_group_key == "nav_general"
+        else "Clockify"
+        if selected_group_key == "nav_clockify"
+        else "Análisis"
+    )
 
     for title, fn in groups[group_name]:
         if title == selected_title:

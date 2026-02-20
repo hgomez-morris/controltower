@@ -150,6 +150,10 @@ def main() -> None:
                 "cliente_nuevo": cf.get("cliente_nuevo") or cf.get("Cliente_nuevo"),
                 "responsable_proyecto": cf.get("Responsable Proyecto"),
                 "sponsor": cf.get("Sponsor"),
+                "tipo_proyecto": cf.get("Tipo de proyecto") or cf.get("Tipo de Proyecto") or cf.get("Tipo proyecto"),
+                "clasificacion": cf.get("Clasificación") or cf.get("Clasificacion"),
+                "segmento_empresa": cf.get("Segmento Empresa") or cf.get("Segmento empresa") or cf.get("Segmento"),
+                "pais": cf.get("País") or cf.get("Pais"),
                 "aws_opp_id": cf.get("AWS OPP ID"),
                 "id_comercial": cf.get("ID_Comercial"),
                 "search_text": _search_text({
@@ -157,6 +161,10 @@ def main() -> None:
                     "pmo_id": cf.get("PMO ID"),
                     "cliente_nuevo": cf.get("cliente_nuevo") or cf.get("Cliente_nuevo"),
                     "responsable_proyecto": cf.get("Responsable Proyecto"),
+                    "tipo_proyecto": cf.get("Tipo de proyecto") or cf.get("Tipo de Proyecto") or cf.get("Tipo proyecto"),
+                    "clasificacion": cf.get("Clasificación") or cf.get("Clasificacion"),
+                    "segmento_empresa": cf.get("Segmento Empresa") or cf.get("Segmento empresa") or cf.get("Segmento"),
+                    "pais": cf.get("País") or cf.get("Pais"),
                     "aws_opp_id": cf.get("AWS OPP ID"),
                     "id_comercial": cf.get("ID_Comercial"),
                 }),
@@ -167,11 +175,13 @@ def main() -> None:
             conn.execute(text("""
                 INSERT INTO projects_history (
                     gid, name, owner_gid, owner_name, status, last_status_update_at, last_status_update_by,
-                    pmo_id, cliente_nuevo, responsable_proyecto, sponsor, aws_opp_id, id_comercial,
+                    pmo_id, cliente_nuevo, responsable_proyecto, sponsor, tipo_proyecto, clasificacion, segmento_empresa, pais,
+                    aws_opp_id, id_comercial,
                     search_text, raw_data, snapshot_at
                 ) VALUES (
                     :gid, :name, :owner_gid, :owner_name, :status, :last_status_update_at, :last_status_update_by,
-                    :pmo_id, :cliente_nuevo, :responsable_proyecto, :sponsor, :aws_opp_id, :id_comercial,
+                    :pmo_id, :cliente_nuevo, :responsable_proyecto, :sponsor, :tipo_proyecto, :clasificacion, :segmento_empresa, :pais,
+                    :aws_opp_id, :id_comercial,
                     :search_text, CAST(:raw_data AS jsonb), :snapshot_at
                 )
                 ON CONFLICT (gid) DO NOTHING

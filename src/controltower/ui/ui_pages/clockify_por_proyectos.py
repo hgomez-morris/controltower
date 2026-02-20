@@ -142,12 +142,14 @@ def render():
             st.stop()
 
     df = build_project_main_df(rows, week_starts, add_total_project=add_total_project)
+    df_display = df.drop(columns=["Proyecto Clockify"]) if "Proyecto Clockify" in df.columns else df
 
     numeric_cols = [
         col
-        for col in df.columns
+        for col in df_display.columns
         if col
         not in (
+            "PMO-ID",
             "Proyecto",
             "Responsable",
             "Tendencia acumulada",
@@ -159,7 +161,7 @@ def render():
     format_map["HH plan."] = lambda v: "NA" if pd.isna(v) else f"{float(v):.2f}"
     format_map["% cump."] = lambda v: "NA" if pd.isna(v) else f"{float(v):.1f}%"
     styled_df = (
-        df.style.format(format_map)
+        df_display.style.format(format_map)
         .map(trend_cell_style, subset=["Tendencia acumulada"])
         .apply(total_vs_planned_style, axis=1)
         .apply(lambda row: closed_project_row_style(row, closed_projects), axis=1)
@@ -181,9 +183,9 @@ def render():
     selected_idx = _selected_row_index(selection)
     if selected_idx is None:
         return
-    if selected_idx < 0 or selected_idx >= len(df):
+    if selected_idx < 0 or selected_idx >= len(df_display):
         return
-    selected_project = str(df.iloc[selected_idx]["Proyecto"])
+    selected_project = str(df.iloc[selected_idx].get("Proyecto Clockify") or df.iloc[selected_idx]["Proyecto"])
 
     conn = get_conn()
     try:

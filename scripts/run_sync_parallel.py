@@ -32,8 +32,11 @@ from controltower.sync.sync_runner import (
     _phase_is_terminated_or_cancelled,
     _recently_closed_or_cancelled,
     _cf_value,
+    _cf_value_any,
     _cf_value_by_gid_or_name,
     _cf_bool_like,
+    _cf_date_by_name,
+    _cf_number_like,
 )
 from controltower.utils.logging import configure_logging
 
@@ -203,8 +206,28 @@ def main() -> None:
                     "tasks_created_last_7d": metrics["tasks_created_last_7d"],
                     "tasks_completed_last_7d": metrics["tasks_completed_last_7d"],
                     "tasks_modified_last_7d": metrics["tasks_modified_last_7d"],
+                    "start_date": _cf_date_by_name(
+                        pfull,
+                        "Fecha Inicio del Proyecto",
+                        gid="1207505889399729",
+                    ),
+                    "planned_hours_total": _cf_number_like(
+                        pfull,
+                        ["Horas planificadas", "Horas Planificadas"],
+                        gids=["1207505889399760"],
+                    ),
+                    "effective_hours_total": _cf_number_like(
+                        pfull,
+                        ["Horas efectivas", "Horas efectivas "],
+                        gids=["1207505889399792"],
+                    ),
                     "pmo_id": _cf_value(pfull, "PMO ID"),
                     "sponsor": _cf_value(pfull, "Sponsor"),
+                    "cliente_nuevo": _cf_value_any(pfull, ["cliente_nuevo", "cliente nuevo"]),
+                    "tipo_proyecto": _cf_value_any(pfull, ["tipo de proyecto", "tipo proyecto"]),
+                    "clasificacion": _cf_value_any(pfull, ["clasificación", "clasificacion"]),
+                    "segmento_empresa": _cf_value_any(pfull, ["segmento empresa", "segmento de empresa", "segmento"]),
+                    "pais": _cf_value_any(pfull, ["país", "pais"]),
                     "responsable_proyecto": _cf_value(pfull, "Responsable Proyecto"),
                     "business_vertical": _cf_value_by_gid_or_name(pfull, "1209701308000267", "Business Vertical"),
                     "fase_proyecto": _cf_value_by_gid_or_name(pfull, "1207505889399747", "Fase del proyecto"),
@@ -217,7 +240,8 @@ def main() -> None:
                 existing = conn.execute(text("""
                     SELECT gid, name, owner_gid, owner_name, due_date, status, calculated_progress,
                            last_status_update_at, last_status_update_by, last_activity_at,
-                           total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d
+                           total_tasks, completed_tasks, tasks_created_last_7d, tasks_completed_last_7d, tasks_modified_last_7d,
+                           start_date, planned_hours_total, effective_hours_total
                     FROM projects WHERE gid=:gid
                 """), {"gid": pfull.get("gid")}).mappings().first()
 

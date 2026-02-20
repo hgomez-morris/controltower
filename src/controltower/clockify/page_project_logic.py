@@ -15,8 +15,14 @@ def is_closed_project(status, phase, completed) -> bool:
 def enrich_project_rows(rows: list[dict], asana_by_pmo: Dict[str, Dict], extract_pmo_id_fn) -> Tuple[list[dict], set[str]]:
     closed_projects: set[str] = set()
     for row in rows:
-        pmo_id = extract_pmo_id_fn(str(row.get("Proyecto", "")))
+        clockify_name = str(row.get("Proyecto", ""))
+        pmo_id = extract_pmo_id_fn(clockify_name)
         asana_data = asana_by_pmo.get(pmo_id or "", {})
+        row["Proyecto Clockify"] = clockify_name
+        if pmo_id:
+            row["PMO-ID"] = pmo_id
+        if asana_data.get("name"):
+            row["Proyecto"] = asana_data.get("name")
         planned = asana_data.get("horas_planificadas")
         row["Responsable"] = asana_data.get("responsable_proyecto") or "NA"
         row["Horas planificadas"] = round(float(planned), 2) if planned is not None else float("nan")
@@ -45,7 +51,7 @@ def enrich_project_rows(rows: list[dict], asana_by_pmo: Dict[str, Dict], extract
 
 def build_project_main_df(rows: list[dict], week_starts: List[str], add_total_project: bool) -> pd.DataFrame:
     df = pd.DataFrame(rows)
-    ordered_cols = ["Proyecto", "Responsable", "Tendencia acumulada", "Horas planificadas"]
+    ordered_cols = ["PMO-ID", "Proyecto", "Proyecto Clockify", "Responsable", "Tendencia acumulada", "Horas planificadas"]
     if add_total_project:
         ordered_cols.extend(["Total proyecto", "Imputación total (%)"])
     ordered_cols.append("Total (semanas visibles)")
@@ -67,8 +73,12 @@ def build_project_main_df(rows: list[dict], week_starts: List[str], add_total_pr
     for metric_col in ("HH plan.", "% cump."):
         if metric_col in df.columns:
             df[metric_col] = pd.to_numeric(df[metric_col], errors="coerce")
-    if "% cump." in df.columns:
-        df = df.sort_values(by="% cump.", ascending=False, na_position="last", kind="mergesort")
+    if "PMO-ID" in df.columns:
+        def _pmo_num(value):
+            text = str(value or "")
+            digits = "".join([c for c in text if c.isdigit()])
+            return int(digits) if digits else 10**9
+        df = df.sort_values(by="PMO-ID", key=lambda s: s.map(_pmo_num), ascending=True, na_position="last", kind="mergesort")
     return df
 
 

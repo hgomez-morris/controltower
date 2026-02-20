@@ -135,6 +135,13 @@ Luego ejecutar backfill de columnas derivadas:
   - Incremental ventana: `python scripts/run_clockify_sync.py --incremental-days 30`
   - Rango explícito: `python scripts/run_clockify_sync.py --start 2025-01-01T00:00:00Z --end 2025-10-31T23:59:59Z`
 
+### Pipeline ML (Predicción de Riesgo)
+- Script: `python scripts/run_ml_risk_prediction.py`
+- Parámetros:
+  - `--recalc-weeks 9` (recalcula últimas semanas completas)
+  - `--weekly-capacity-hours 45`
+  - `--model-dir models`
+
 ### Orquestación (Asana + Clockify)
 `scripts/run_sync.py` ejecuta:
 1) Sync Asana

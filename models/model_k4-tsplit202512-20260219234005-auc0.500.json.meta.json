@@ -1,0 +1,33 @@
+{
+  "feature_columns": [
+    "ratio_burn",
+    "slope_hours_week",
+    "volatility_hours",
+    "active_people_k",
+    "jp_active_projects_k",
+    "people_growth",
+    "hours_top1_share",
+    "log_planned_hours",
+    "business_vertical_aws reseller",
+    "business_vertical_professional services",
+    "tipo_proyecto_migrations",
+    "tipo_proyecto_poc",
+    "tipo_proyecto_professional services",
+    "tipo_proyecto_reseller",
+    "clasificacion_ai & ml",
+    "clasificacion_iot",
+    "clasificacion_migrations",
+    "clasificacion_otros",
+    "segmento_empresa_enterprise",
+    "segmento_empresa_public sector",
+    "segmento_empresa_smb",
+    "segmento_empresa_startup",
+    "pais_chile",
+    "cliente_nuevo_barracks",
+    "cliente_nuevo_buses hualpen",
+    "cliente_nuevo_unknown",
+    "sponsor_enzo maiben",
+    "sponsor_johanna abrigo",
+    "sponsor_matias gomez"
+  ]
+}
